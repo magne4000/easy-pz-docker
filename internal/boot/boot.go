@@ -36,7 +36,6 @@ type drivers struct {
 	rcon sched.RCON
 	cmd  steam.CMD
 	web  steam.WebAPI
-	disk func(string) (sys.DiskUsage, error)
 	sc   *devfake.Scenario
 }
 
@@ -101,7 +100,7 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	if fake {
 		fs := devfake.NewSupervisor(popts, scenario)
 		dr = drivers{sup: fs, rcon: devfake.NewRCON(fs, scenario, consoleLine), cmd: devfake.NewCMD(cfg.InstallDir, scenario, consoleLine),
-			web: devfake.WebAPI{Scenario: scenario}, disk: devfake.DiskUsage(scenario), sc: &scenario}
+			web: devfake.WebAPI{Scenario: scenario}, sc: &scenario}
 	} else {
 		mgr := rcon.NewManager(log.With("component", "rcon"), func() (string, string) { return coord.RCONTarget() })
 		defer mgr.Close()
@@ -159,7 +158,6 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	disk := sys.NewMonitor(sys.MonitorConfig{
 		Paths:   map[string]string{"data": cfg.DataDir, "install": cfg.InstallDir, "backups": cfg.BackupDir},
 		WarnPct: cfg.DiskWarnPct, CritPct: cfg.DiskCritPct, Interval: time.Minute, Log: log.With("component", "disk"),
-		Usage:    dr.disk,
 		OnChange: func(ss []sys.Volume) { bus.Publish(events.DiskStatus{Level: string(sys.Worst(ss))}) },
 	})
 

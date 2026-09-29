@@ -16,7 +16,6 @@ type Scenario struct {
 	Players           []string
 	PlayersLeaveAfter time.Duration
 	CrashAfter        time.Duration
-	DiskUsedPct       float64
 	SlowBackup        bool
 	TriggerBackup     bool
 	Tracked           []string
@@ -31,33 +30,28 @@ const (
 var scenarios = map[string]Scenario{
 	"idle": {
 		Description:    "Installed and up to date, two mods, nobody online",
-		InstalledBuild: buildNew, LatestBuild: buildNew, DiskUsedPct: 41,
+		InstalledBuild: buildNew, LatestBuild: buildNew,
 		Tracked: []string{"2392709985", "2169435993"},
 	},
 	"update-window": {
 		Description:    "Game and one mod outdated; two players online who leave after 90s",
-		InstalledBuild: buildOld, LatestBuild: buildNew, DiskUsedPct: 55,
+		InstalledBuild: buildOld, LatestBuild: buildNew,
 		Players: []string{"alice", "bob"}, PlayersLeaveAfter: 90 * time.Second,
 		Tracked: []string{"2392709985", "2478768005", "2200148440"}, OutdatedMods: []string{"2478768005"},
 	},
 	"backup-running": {
 		Description:    "A slow backup starts right after boot",
-		InstalledBuild: buildNew, LatestBuild: buildNew, DiskUsedPct: 62, SlowBackup: true, TriggerBackup: true,
+		InstalledBuild: buildNew, LatestBuild: buildNew, SlowBackup: true, TriggerBackup: true,
 		Players: []string{"carol"}, Tracked: []string{"2392709985"},
 	},
 	"crash-loop": {
 		Description:    "The server crashes shortly after every start",
-		InstalledBuild: buildNew, LatestBuild: buildNew, DiskUsedPct: 40, CrashAfter: 8 * time.Second,
-		Tracked: []string{"2392709985"},
-	},
-	"disk-nearly-full": {
-		Description:    "The data volume is 97% full",
-		InstalledBuild: buildNew, LatestBuild: buildNew, DiskUsedPct: 97,
+		InstalledBuild: buildNew, LatestBuild: buildNew, CrashAfter: 8 * time.Second,
 		Tracked: []string{"2392709985"},
 	},
 	"mod-conflict": {
 		Description:    "Two enabled mods override the same files; one mod misses a requirement",
-		InstalledBuild: buildNew, LatestBuild: buildNew, DiskUsedPct: 45,
+		InstalledBuild: buildNew, LatestBuild: buildNew,
 		Tracked: []string{"2875848298", "2875848299", "2478768005"},
 	},
 }

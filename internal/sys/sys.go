@@ -138,8 +138,6 @@ type MonitorConfig struct {
 	Clock    Clock
 	OnChange func([]Volume)
 	Log      *slog.Logger
-	// Usage overrides the statfs probe (dev fakes).
-	Usage func(string) (DiskUsage, error)
 }
 
 type Monitor struct {
@@ -159,11 +157,7 @@ func NewMonitor(c MonitorConfig) *Monitor {
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
-	u := c.Usage
-	if u == nil {
-		u = Usage
-	}
-	return &Monitor{c: c, usage: u}
+	return &Monitor{c: c, usage: Usage}
 }
 
 func (m *Monitor) sample() []Volume {

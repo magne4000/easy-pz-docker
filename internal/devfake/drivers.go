@@ -15,7 +15,6 @@ import (
 	"github.com/magne4000/easy-pz-docker/internal/pz"
 	"github.com/magne4000/easy-pz-docker/internal/pz/rcon"
 	"github.com/magne4000/easy-pz-docker/internal/steam"
-	"github.com/magne4000/easy-pz-docker/internal/sys"
 )
 
 // ---------- Supervisor ----------
@@ -524,22 +523,4 @@ func (WebAPI) CollectionDetails(ctx context.Context, id string) ([]string, error
 		return ids, nil
 	}
 	return nil, fmt.Errorf("%w: %s", steam.ErrCollectionNotFound, id)
-}
-
-// ---------- disk ----------
-
-// DiskUsage reports the scenario's fill level for the data volume.
-func DiskUsage(sc Scenario) func(string) (sys.DiskUsage, error) {
-	return func(path string) (sys.DiskUsage, error) {
-		u, err := sys.Usage(path)
-		if err != nil {
-			return u, err
-		}
-		if sc.DiskUsedPct > 0 {
-			const total = 2_000_000_000_000
-			used := uint64(float64(total) * sc.DiskUsedPct / 100)
-			u = sys.DiskUsage{Path: path, Total: total, Used: used, Free: total - used, UsedPercent: sc.DiskUsedPct}
-		}
-		return u, nil
-	}
 }

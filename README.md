@@ -111,8 +111,7 @@ make clean-dev           # reset the fake server tree between scenarios
 
 Dev login: `admin` / `devpassword`. With `PANEL_DRIVERS=fake` there is no game,
 SteamCMD or RCON: in-memory drivers replay a scenario — `idle`,
-`update-window`, `backup-running`, `crash-loop`, `disk-nearly-full`,
-`mod-conflict` — against a real miniature file tree under `.dev/`. The fake
+`update-window`, `backup-running`, `crash-loop`, `mod-conflict` — against a real miniature file tree under `.dev/`. The fake
 server's public mod page is at `http://localhost:5173/mods/dev-token/`.
 
 | Command | |
