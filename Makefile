@@ -15,9 +15,13 @@ dev:
 	$(MAKE) -j2 dev-ui dev-api
 
 # wgo is pinned in go.mod (tool directive): nothing to install.
+# Exec the wgo binary directly rather than via `go tool wgo`: `go tool` forwards
+# SIGINT to wgo on top of the one the terminal already sends, and wgo treats a
+# second SIGINT as a hard interrupt (exits without waiting for pzman), which
+# leaves processes running in the background after Ctrl+C.
 dev-api:
 	@echo "[dev-api] building the Go backend (the first build takes a minute)…"
-	$(DEV_ENV) go tool wgo run ./cmd/pzman
+	$(DEV_ENV) exec "$$(go tool -n wgo)" run ./cmd/pzman
 
 dev-ui:
 	cd web && bun run dev
