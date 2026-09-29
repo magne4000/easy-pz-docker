@@ -38,17 +38,16 @@ func (c *Coordinator) PreStart(ctx context.Context) ([]string, error) {
 	c.mu.Lock()
 	c.loaded = loaded
 	c.mu.Unlock()
-	var args []string
-	if _, err := os.Stat(filepath.Join(cfg.DataDir, "db", cfg.ServerName+".db")); errors.Is(err, fs.ErrNotExist) {
-		pw := cfg.GameAdminPassword
-		if pw == "" {
-			pw = randomToken(12)
-			c.o.Log.Warn("ADMIN_PASSWORD is not set; generated an in-game admin password for the first boot",
-				"admin_username", cfg.GameAdminUser, "admin_password", pw)
-		}
-		args = append(args, "-adminusername", cfg.GameAdminUser, "-adminpassword", pw)
+	// Passed on every boot: without -adminusername PZ looks for the default
+	// "admin" account and, when it is missing, blocks on a stdin password
+	// prompt. PZ only uses the password to create a missing account.
+	pw := cfg.GameAdminPassword
+	if pw == "" {
+		pw = randomToken(12)
+		c.o.Log.Warn("ADMIN_PASSWORD is not set; generated an in-game admin password, used only if the account does not exist yet",
+			"admin_username", cfg.GameAdminUser, "admin_password", pw)
 	}
-	return args, nil
+	return []string{"-adminusername", cfg.GameAdminUser, "-adminpassword", pw}, nil
 }
 
 // Loaded is Mods= as the running server was started with (nil when stopped).
