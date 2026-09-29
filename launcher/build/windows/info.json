@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.0.1"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.0.1",
+			"CompanyName": "EasyPZ",
+			"FileDescription": "Keeps Project Zomboid mods in sync with a pzman server and joins it",
+			"LegalCopyright": "(c) 2026, EasyPZ",
+			"ProductName": "EasyPZ Launcher",
+			"Comments": "This is a comment"
+		}
+	}
+}

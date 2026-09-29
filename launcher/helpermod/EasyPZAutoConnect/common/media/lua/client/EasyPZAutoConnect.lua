@@ -1,18 +1,4 @@
--- EasyPZ Auto-Connect
---
--- The launcher writes ~/Zomboid/Lua/easypz-autoconnect.ini right before
--- starting the game. On the main menu this mod reads it, erases it (one-shot),
--- and connects the same way MultiplayerUI does for a saved account.
---
--- Keys (one key=value per line):
---   host, port            server address (required)
---   user                  account username (required)
---   password              account password: the stored hash when doHash=false,
---                         plain text when doHash=true
---   doHash                "false" (default) or "true"
---   serverPassword        server Password= (optional)
---   serverName            shown on the connecting screen (optional)
---   authType              1 = password (default)
+-- Joins the server in ~/Zomboid/Lua/easypz-autoconnect.ini (written by the launcher), once.
 
 local FILE = "easypz-autoconnect.ini"
 local TAG = "[EasyPZAutoConnect] "
@@ -31,7 +17,6 @@ local function readConfig()
         end
     end
     reader:close()
-    -- One-shot: truncate so a later normal launch does not auto-join.
     local writer = getFileWriter(FILE, true, false)
     writer:close()
     return cfg
@@ -54,7 +39,7 @@ local function connect(cfg)
         tonumber(cfg.authType) or 1)
 end
 
--- Wait one front-end tick so vanilla's OnMainMenuEnter handler has built MainScreen.
+-- Wait a tick: vanilla's OnMainMenuEnter handler builds MainScreen.
 local function onFETick()
     Events.OnFETick.Remove(onFETick)
     if isIngameState() or not MainScreen.instance or not ConnectToServer.instance then return end

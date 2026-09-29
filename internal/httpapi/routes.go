@@ -14,6 +14,7 @@ import (
 	"github.com/magne4000/easy-pz-docker/internal/backup"
 	"github.com/magne4000/easy-pz-docker/internal/events"
 	"github.com/magne4000/easy-pz-docker/internal/mods"
+	"github.com/magne4000/easy-pz-docker/internal/publicapi"
 	"github.com/magne4000/easy-pz-docker/internal/pz"
 	"github.com/magne4000/easy-pz-docker/internal/pz/rcon"
 	"github.com/magne4000/easy-pz-docker/internal/sched"
@@ -45,7 +46,7 @@ func RegisterRoutes(api huma.API, d Deps) {
 	if o.Extensions == nil {
 		o.Extensions = map[string]any{}
 	}
-	o.Extensions["x-public-mod-page"] = o.Components.Schemas.Schema(reflect.TypeFor[PublicData](), true, "")
+	o.Extensions["x-public-mod-page"] = o.Components.Schemas.Schema(reflect.TypeFor[publicapi.PublicData](), true, "")
 }
 
 // mapErr translates domain errors to problem responses. Domain packages never import Huma.
