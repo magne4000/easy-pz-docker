@@ -1,0 +1,31 @@
+# Drop-in replacement for the indifferentbroccoli image: same volumes, same env names.
+services:
+  projectzomboid:
+    image: ghcr.io/magne4000/easy-pz-docker:latest
+    restart: unless-stopped
+    # Must exceed the worst-case save + quit.
+    stop_grace_period: 120s
+    environment:
+      PUID: "568"
+      PGID: "568"
+      SERVER_NAME: Guyverotte
+      ADMIN_USERNAME: magne
+      ADMIN_PASSWORD: change-me          # in-game admin, used on the first boot only
+      DEFAULT_PORT: "16261"
+      UDP_PORT: "16262"
+      MAX_PLAYERS: "8"
+      USE_STEAM: "false"                 # non-Steam mode: pzman downloads and links Workshop mods
+      MEMORY_XMX_GB: "8"
+      TZ: Europe/Paris
+      # Panel login: a bcrypt hash, never a plaintext password. See the README.
+      PANEL_ADMIN_USER: magne
+      PANEL_ADMIN_PASSWORD_HASH: "$$2y$$12$$replace.with.your.own.bcrypt.hash.................."
+      # PANEL_TRUSTED_PROXIES: 172.18.0.1   # your reverse proxy, for client IPs and Secure cookies
+    ports:
+      - "8080:8080/tcp"     # panel (put it behind your reverse proxy for TLS)
+      - "16261:16261/udp"
+      - "16262:16262/udp"
+    volumes:
+      - /mnt/apps/docker/zomboid/files:/project-zomboid
+      - /mnt/apps/docker/zomboid/data:/project-zomboid-config
+      - /mnt/apps/docker/zomboid/backups:/backups

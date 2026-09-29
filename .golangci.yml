@@ -1,0 +1,35 @@
+version: "2"
+linters:
+  default: standard
+  settings:
+    errcheck:
+      # Best-effort cleanup and drains whose failure has no useful handling.
+      exclude-functions:
+        - (*os.File).Close
+        - (io.Closer).Close
+        - (net.Conn).Close
+        - (net.Conn).SetDeadline
+        - (net.Conn).SetReadDeadline
+        - (*io.PipeWriter).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+        - (*github.com/magne4000/easy-pz-docker/internal/pz/rcon.Client).Close
+        - (*github.com/magne4000/easy-pz-docker/internal/pz/rcon.Manager).Close
+        - (*github.com/magne4000/easy-pz-docker/internal/store.DB).Close
+        - io.Copy
+        - fmt.Fprintf
+        - os.Remove
+        - os.RemoveAll
+        - os.Rename
+        - os.Chmod
+        - os.Chtimes
+        - (*github.com/gofiber/fiber/v3.App).ShutdownWithContext
+        - github.com/danielgtaylor/huma/v2.WriteErr
+        - (github.com/go-co-op/gocron/v2.Scheduler).RemoveJob
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [errcheck]
+      - path: internal/devfake/
+        linters: [errcheck]

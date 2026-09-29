@@ -1,0 +1,17 @@
+version: "2"
+sql:
+  - engine: sqlite
+    schema: migrations
+    queries: queries.sql
+    gen:
+      go:
+        package: sqlcdb
+        out: sqlcdb
+        emit_empty_slices: true
+        overrides:
+          - column: mod_entries.enabled
+            go_type: bool
+          - column: schedules.enabled
+            go_type: bool
+          - column: backups.pinned
+            go_type: bool

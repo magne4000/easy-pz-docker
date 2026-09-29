@@ -1,0 +1,183 @@
+package steam
+
+import (
+	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/require"
+)
+
+const appManifest = `"AppState"
+{
+	"appid"		"380870"
+	"StateFlags"		"4"
+	"buildid"		"24909836"
+	"LastUpdated"		"1757000000"
+	"SizeOnDisk"		"123"
+	"UserConfig" { "BetaKey" "unstable" }
+	"MountedConfig" { "BetaKey" "public" }
+}`
+
+const wsManifest = `"AppWorkshop"
+{
+	"appid"		"108600"
+	"WorkshopItemsInstalled"
+	{
+		"2169435993"
+		{
+			"size"		"31729"
+			"timeupdated"		"1700000000"
+			"manifest"		"123"
+		}
+	}
+}`
+
+const appInfo = `Redirecting stderr to '/root/Steam/logs/stderr.txt'
+[  0%] Checking for available updates...
+Connecting anonymously to Steam Public...OK
+AppID : 380870, change number : 1/2, last change : Mon Sep 15
+"380870"
+{
+	"common" { "name" "Project Zomboid Dedicated Server" "desc" "has \"quotes\" {" }
+	"depots"
+	{
+		"branches"
+		{
+			"public" { "buildid" "24909836" "timeupdated" "1757000000" }
+			"unstable" { "buildid" "25000000" }
+		}
+	}
+}
+Unloading Steam API...OK`
+
+func TestManifests(t *testing.T) {
+	dir := t.TempDir()
+	_, err := ReadAppManifest(dir)
+	require.ErrorIs(t, err, os.ErrNotExist)
+	ws, err := ReadWorkshopManifest(dir)
+	require.NoError(t, err)
+	require.Empty(t, ws)
+
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "steamapps", "workshop"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "steamapps", "appmanifest_380870.acf"), []byte(appManifest), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "steamapps", "workshop", "appworkshop_108600.acf"), []byte(wsManifest), 0o644))
+	m, err := ReadAppManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, "24909836", m.BuildID)
+	require.Equal(t, "unstable", m.Branch)
+	ws, err = ReadWorkshopManifest(dir)
+	require.NoError(t, err)
+	require.Equal(t, int64(31729), ws["2169435993"].Size)
+	require.Equal(t, int64(1700000000), ws["2169435993"].TimeUpdated.Unix())
+}
+
+func TestParseAppInfo(t *testing.T) {
+	id, err := ParseAppInfoBuildID(appInfo, "")
+	require.NoError(t, err)
+	require.Equal(t, "24909836", id)
+	id, err = ParseAppInfoBuildID(appInfo, "unstable")
+	require.NoError(t, err)
+	require.Equal(t, "25000000", id)
+	_, err = ParseAppInfoBuildID(appInfo, "nope")
+	require.Error(t, err)
+}
+
+func fakeRun(transcript string, delay time.Duration) runFunc {
+	return func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
+		pr, pw := io.Pipe()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for _, l := range strings.SplitAfter(transcript, "\n") {
+				select {
+				case <-ctx.Done():
+					pw.Close()
+					return
+				case <-time.After(delay):
+				}
+				pw.Write([]byte(l))
+			}
+			<-ctx.Done()
+			pw.Close()
+		}()
+		return pr, func() error { <-done; return ctx.Err() }, nil
+	}
+}
+
+func newTest(transcript string, stall time.Duration) (*SteamCMD, *[]Progress) {
+	s := NewSteamCMD(Options{InstallDir: "/x", Stall: stall, UID: -1})
+	s.run = func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
+		pr, pw := io.Pipe()
+		go func() { io.WriteString(pw, transcript); pw.Close() }()
+		return pr, func() error { return nil }, nil
+	}
+	var ps []Progress
+	return s, &ps
+}
+
+func TestAppUpdateParsing(t *testing.T) {
+	s, ps := newTest("Connecting anonymously to Steam Public...OK\r\n\x1b[0m Update state (0x61) downloading, progress: 45.23 (1 / 2)\r Update state (0x81) committing, progress: 99.00 (2 / 2)\nSuccess! App '380870' fully installed.\n", time.Second)
+	require.NoError(t, s.AppUpdate(context.Background(), "", true, func(p Progress) { *ps = append(*ps, p) }))
+	require.Equal(t, 45.23, (*ps)[1].Percent)
+	require.Equal(t, "committing", (*ps)[2].Phase)
+
+	s, _ = newTest("Error! App '380870' state is 0x202 after update job.\n", time.Second)
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "0x202")
+
+	s, _ = newTest("Success. Downloaded item 1 to \"/x\" (10 bytes)\n", time.Second)
+	s.o.Guard = func() error { return errors.New("server running") }
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "server running")
+	// Adding a mod while the server runs must still download it.
+	require.NoError(t, s.WorkshopDownload(context.Background(), []string{"1"}, nil))
+}
+
+func TestWorkshopDownloadParsing(t *testing.T) {
+	s, _ := newTest("Success. Downloaded item 1 to \"/x\" (10 bytes)\nERROR! Download item 2 failed (Failure).\n", time.Second)
+	err := s.WorkshopDownload(context.Background(), []string{"1", "2"}, nil)
+	require.ErrorContains(t, err, "2 (Failure)")
+	require.NotContains(t, err.Error(), "1 (")
+}
+
+func TestStallWatchdog(t *testing.T) {
+	s := NewSteamCMD(Options{InstallDir: "/x", Stall: 100 * time.Millisecond, UID: -1})
+	s.run = fakeRun("Connecting...\n", time.Millisecond)
+	start := time.Now()
+	err := s.AppUpdate(context.Background(), "", false, nil)
+	require.ErrorIs(t, err, ErrStalled)
+	require.Less(t, time.Since(start), 2*time.Second)
+}
+
+func TestWebAPI(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.ParseForm()
+		switch {
+		case strings.Contains(r.URL.Path, "GetPublishedFileDetails"):
+			require.Equal(t, "2", r.Form.Get("itemcount"))
+			io.WriteString(w, `{"response":{"publishedfiledetails":[{"publishedfileid":"1","result":1,"title":"Brita","file_size":"3088000000","time_updated":1700000000,"tags":[{"tag":"Build 42"}]},{"publishedfileid":"2","result":9}]}}`)
+		case strings.Contains(r.URL.Path, "GetCollectionDetails") && r.Form.Get("publishedfileids[0]") == "7":
+			// Steam's real answer for a plain item id (3378285185) or a private collection
+			io.WriteString(w, `{"response":{"result":1,"resultcount":0,"collectiondetails":[{"publishedfileid":"7","result":9}]}}`)
+		case strings.Contains(r.URL.Path, "GetCollectionDetails"):
+			io.WriteString(w, `{"response":{"collectiondetails":[{"result":1,"children":[{"publishedfileid":"b","sortorder":2,"filetype":0},{"publishedfileid":"a","sortorder":1,"filetype":0},{"publishedfileid":"c","sortorder":3,"filetype":2}]}]}}`)
+		}
+	}))
+	defer srv.Close()
+	api := NewWebAPI(srv.Client(), srv.URL)
+	ds, err := api.PublishedFileDetails(context.Background(), []string{"1", "2"})
+	require.NoError(t, err)
+	require.Equal(t, int64(3088000000), ds[0].FileSize)
+	require.Equal(t, []string{"Build 42"}, ds[0].Tags)
+	ids, err := api.CollectionDetails(context.Background(), "99")
+	require.NoError(t, err)
+	require.Equal(t, []string{"a", "b"}, ids)
+	_, err = api.CollectionDetails(context.Background(), "7")
+	require.ErrorIs(t, err, ErrCollectionNotFound)
+}
