@@ -21,6 +21,7 @@ linters:
         - fmt.Fprintf
         - os.Remove
         - os.RemoveAll
+        - (*github.com/google/renameio/v2.PendingFile).Cleanup
         - os.Rename
         - os.Chmod
         - os.Chtimes
