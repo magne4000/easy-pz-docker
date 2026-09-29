@@ -161,10 +161,12 @@ func splitCRLF(data []byte, atEOF bool) (int, []byte, error) {
 	return 0, nil, nil
 }
 
+const tailLines = 8
+
 var (
 	reProgress   = regexp.MustCompile(`Update state \((0x[0-9a-fA-F]+)\) ([a-z ,]+?), progress: ([0-9.]+)`)
 	reAppOK      = regexp.MustCompile(`Success! App '(\d+)' (fully installed|already up to date)`)
-	reAppErr     = regexp.MustCompile(`(?i)Error! App '(\d+)' state is (0x[0-9a-fA-F]+) after update job`)
+	reAppErr     = regexp.MustCompile(`(?i)(Error! App '(\d+)' state is (0x[0-9a-fA-F]+) after update job|ERROR! Failed to install app '(\d+)')`)
 	reWsOK       = regexp.MustCompile(`Success\. Downloaded item (\d+) to`)
 	reWsErr      = regexp.MustCompile(`(?i)ERROR! Download item (\d+) failed \(([^)]*)\)`)
 	reLoginError = regexp.MustCompile(`(?i)(FAILED \(|Login Failure|No subscription)`)
@@ -201,12 +203,33 @@ func (s *SteamCMD) AppUpdate(ctx context.Context, branch string, validate bool, 
 	}
 	args = append(args, "+quit")
 	onProgress(Progress{Phase: "login", Message: "Connecting to Steam"})
+	err := s.appUpdateOnce(ctx, args, onProgress)
+	// A fresh Steam home has no cached app info, and steamcmd's first app_update
+	// then often fails with "Missing configuration"; the rerun finds it cached.
+	if err != nil && strings.Contains(err.Error(), "Missing configuration") {
+		s.o.Log.Warn("steamcmd reported missing configuration, retrying once", "err", err)
+		err = s.appUpdateOnce(ctx, args, onProgress)
+	}
+	if err != nil {
+		return err
+	}
+	onProgress(Progress{Phase: "done", Percent: 100, Message: "Game files up to date"})
+	return nil
+}
+
+func (s *SteamCMD) appUpdateOnce(ctx context.Context, args []string, onProgress func(Progress)) error {
 	var ok bool
 	var failure string
+	var tail []string // last non-progress lines, for errors steamcmd reports in a form we don't recognise
 	err := s.invoke(ctx, args, func(line string) {
 		if m := reProgress.FindStringSubmatch(line); m != nil {
 			pct, _ := strconv.ParseFloat(m[3], 64)
 			onProgress(Progress{Phase: phaseOf(m[2]), Percent: pct, Message: line})
+		} else {
+			if len(tail) == tailLines {
+				tail = tail[1:]
+			}
+			tail = append(tail, line)
 		}
 		if reAppOK.MatchString(line) {
 			ok = true
@@ -222,9 +245,8 @@ func (s *SteamCMD) AppUpdate(ctx context.Context, branch string, validate bool, 
 		return fmt.Errorf("steamcmd: %s", failure)
 	}
 	if !ok {
-		return errors.New("steamcmd: app_update finished without a success line")
+		return fmt.Errorf("steamcmd: app_update finished without a success line; last output: %s", strings.Join(tail, " | "))
 	}
-	onProgress(Progress{Phase: "done", Percent: 100, Message: "Game files up to date"})
 	return nil
 }
 

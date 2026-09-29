@@ -132,11 +132,41 @@ func TestAppUpdateParsing(t *testing.T) {
 	s, _ = newTest("Error! App '380870' state is 0x202 after update job.\n", time.Second)
 	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "0x202")
 
+	s, _ = newTest("ERROR! Failed to install app '380870' (Disk write failure)\n", time.Second)
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "Disk write failure")
+
+	s, _ = newTest("Loading Steam API...OK\nSomething unexpected\n", time.Second)
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "Something unexpected")
+
 	s, _ = newTest("Success. Downloaded item 1 to \"/x\" (10 bytes)\n", time.Second)
 	s.o.Guard = func() error { return errors.New("server running") }
 	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "server running")
 	// Adding a mod while the server runs must still download it.
 	require.NoError(t, s.WorkshopDownload(context.Background(), []string{"1"}, nil))
+}
+
+func TestAppUpdateRetriesMissingConfiguration(t *testing.T) {
+	transcripts := []string{
+		"ERROR! Failed to install app '380870' (Missing configuration)\n",
+		"Success! App '380870' fully installed.\n",
+	}
+	s, _ := newTest("", time.Second)
+	calls := 0
+	s.run = func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
+		pr, pw := io.Pipe()
+		tr := transcripts[min(calls, len(transcripts)-1)]
+		calls++
+		go func() { io.WriteString(pw, tr); pw.Close() }()
+		return pr, func() error { return nil }, nil
+	}
+	require.NoError(t, s.AppUpdate(context.Background(), "", false, nil))
+	require.Equal(t, 2, calls)
+
+	// Only one retry: a persistent failure still surfaces.
+	calls = 0
+	transcripts = transcripts[:1]
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "Missing configuration")
+	require.Equal(t, 2, calls)
 }
 
 func TestWorkshopDownloadParsing(t *testing.T) {
