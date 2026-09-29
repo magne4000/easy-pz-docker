@@ -80,7 +80,13 @@ func Usage(path string) (DiskUsage, error) {
 	if err := unix.Statfs(path, &st); err != nil {
 		return DiskUsage{}, fmt.Errorf("statfs %s: %w", path, err)
 	}
-	bs := uint64(st.Bsize)
+	// Block counts are in units of the fragment size. Bsize is only the
+	// preferred I/O size and differs on some filesystems (Docker Desktop's
+	// host mounts report 1 MiB against a 4 KiB fragment).
+	bs := uint64(st.Frsize)
+	if bs == 0 {
+		bs = uint64(st.Bsize)
+	}
 	total := uint64(st.Blocks) * bs
 	free := uint64(st.Bavail) * bs
 	used := total - uint64(st.Bfree)*bs
