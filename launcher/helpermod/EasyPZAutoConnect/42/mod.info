@@ -1,0 +1,4 @@
+name=EasyPZ Auto-Connect
+id=EasyPZAutoConnect
+description=Joins the server chosen in the EasyPZ launcher as soon as the main menu opens. Does nothing when the game is started normally.
+versionMin=42.0
