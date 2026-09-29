@@ -38,5 +38,3 @@ web/node_modules/
 .dev/
 web/dist/
 *.tsbuildinfo
-# read-only upstream reference checkout (separate repo)
-/zomboid-control-panel/

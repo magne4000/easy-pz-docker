@@ -5,4 +5,3 @@ pzman
 web/node_modules
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
-zomboid-control-panel

@@ -129,13 +129,3 @@ order, shutdown), `internal/httpapi` (Fiber + Huma, auth, SSE, public page),
 `internal/pz` (ini/launch codecs, supervisor, RCON), `internal/steam`,
 `internal/mods`, `internal/backup`, `internal/sys`, `internal/store`,
 `internal/devfake`, `web/` (React 19 + Tailwind 4 + shadcn/ui).
-
-## Still to verify on real hardware
-
-Whether a zip unpacked into a non-Steam client's `Zomboid/mods` loads, and
-what a client with a mismatched mod set sees.
-
-## License
-
-MIT. The RCON rejection catalogue is ported from
-[zomboid-control-panel](https://github.com/fpsacha/zomboid-control-panel) (MIT).
