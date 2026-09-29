@@ -6,6 +6,8 @@ linters:
       # Best-effort cleanup and drains whose failure has no useful handling.
       exclude-functions:
         - (*os.File).Close
+        - (*archive/zip.ReadCloser).Close
+        - (io/fs.File).Close
         - (io.Closer).Close
         - (net.Conn).Close
         - (net.Conn).SetDeadline

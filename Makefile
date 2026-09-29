@@ -1,4 +1,4 @@
-.PHONY: dev dev-api dev-ui build build-ui build-go gen test lint clean-dev
+.PHONY: dev dev-api dev-ui build build-ui build-go gen test lint clean-dev launcher-dev launcher-build launcher-gen launcher-test
 
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 SCENARIO ?= idle
@@ -46,6 +46,20 @@ test:
 lint:
 	golangci-lint run
 	cd web && bunx biome ci .
+
+# Needs wails3 (version in launcher/go.mod); on Linux, libgtk-4-dev libwebkitgtk-6.0-dev.
+launcher-dev:
+	cd launcher && wails3 task dev
+
+launcher-build:
+	cd launcher && wails3 task build VERSION=$(VERSION)
+
+launcher-gen:
+	cd launcher && wails3 generate bindings -clean=true -ts
+
+launcher-test:
+	cd launcher && go test ./...
+	cd launcher/frontend && bunx biome ci .
 
 # Wipes the fake dev tree (switch scenarios cleanly).
 clean-dev:

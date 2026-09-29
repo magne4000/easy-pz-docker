@@ -24,6 +24,7 @@ profile.cov
 go.work
 go.work.sum
 
+.DS_Store
 /pzman
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
@@ -38,3 +39,7 @@ web/node_modules/
 .dev/
 web/dist/
 *.tsbuildinfo
+
+# Local copies of game files used as reference (not redistributable)
+/projectzomboid.jar
+/pz-lua-client/

@@ -44,6 +44,7 @@ type Config struct {
 	TrustedProxies []string      `env:"PANEL_TRUSTED_PROXIES"`
 	ConsoleRing    int           `env:"PANEL_CONSOLE_RING" envDefault:"2000"`
 	ModsToken      string        `env:"PANEL_MODS_TOKEN"`
+	PublicHost     string        `env:"PANEL_PUBLIC_HOST"`
 	SteamCMD       string        `env:"PANEL_STEAMCMD" envDefault:"/opt/steamcmd/steamcmd.sh"`
 	SteamHome      string        `env:"PANEL_STEAM_HOME" envDefault:"/var/lib/pzman/steam"`
 	CacheDir       string        `env:"PANEL_CACHE_DIR" envDefault:"/var/lib/pzman/cache"`

@@ -17,6 +17,7 @@ backups, scheduling and the web UI.
 - **Player mod page**: an unlisted, `noindex` link where players download the exact mod set as a zip (with resume support and a checksum), plus the config snippet for people hosting the same set.
 - **Server config**: structured editor for the server `.ini`, with *save & reload*.
 - **Sandbox options**: structured editor for `<server>_SandboxVars.lua` with ranges, defaults and choices. Enabled mods' options appear like in the game's sandbox editor: on the mod's page, with its translated names, tooltips and choices (from the mod's `sandbox-options.txt` and English `Sandbox.json`), including options the server has not written to the file yet. Changes apply at the next start.
+- **Launcher** (non-Steam players): syncs mods and joins the server. See [Launcher](#launcher).
 
 ## Running it
 
@@ -79,6 +80,7 @@ Panel variables:
 | `PANEL_COOKIE_SECURE` | `auto` | `auto` trusts `X-Forwarded-Proto` from `PANEL_TRUSTED_PROXIES` (and loopback) only |
 | `PANEL_TRUSTED_PROXIES` | | comma-separated reverse proxy addresses |
 | `PANEL_MODS_TOKEN` | random, persisted | the unlisted `/mods/<token>/` path |
+| `PANEL_PUBLIC_HOST` | | address players join, for the launcher |
 | `PANEL_BACKUP_DIR` | `/backups` | mount a different volume than the one it protects |
 | `PANEL_BACKUP_INTERVAL` / `_KEEP` / `_KEEP_DAILY` / `_KEEP_WEEKLY` / `_MAX_TOTAL_GB` | `2h` / `24` / `7` / `4` / `0` | defaults; editable in the UI |
 | `PANEL_UPDATE_CHECK_INTERVAL` / `PANEL_UPDATE_MAX_DELAY` | `1h` / `2h` | defaults; editable in the UI |
@@ -96,6 +98,13 @@ The panel speaks plain HTTP; put it behind your reverse proxy for TLS and set
 `PANEL_TRUSTED_PROXIES`. The admin login and the public mod page share one port:
 if you publish the mod page to the internet, restrict everything except
 `/mods/<token>/` and `/assets/` to your LAN at the proxy.
+
+## Launcher
+
+`launcher/` is a desktop app for players of a **non-Steam** server: paste the
+server's mod page link, and it keeps the mods in `~/Zomboid/mods` in sync and
+starts the game straight into the server. Set `PANEL_PUBLIC_HOST` so it knows
+where to connect. Builds are on the releases page and update themselves.
 
 ## Developing
 
@@ -122,10 +131,12 @@ server's public mod page is at `http://localhost:5173/mods/dev-token/`.
 | `make gen` | regenerate `api/openapi.json` and `web/src/api/schema.d.ts` (CI fails if stale) |
 | `make build` | UI build embedded into a static `pzman` |
 | `docker build -f docker/Dockerfile .` | the image (linux/amd64) |
+| `make launcher-dev` / `launcher-build` / `launcher-test` / `launcher-gen` | the launcher (needs `wails3`) |
 
 Layout: `cmd/pzman` (entry, `pzman openapi`), `internal/boot` (wiring, boot
 order, shutdown), `internal/httpapi` (Fiber + Huma, auth, SSE, public page),
 `internal/sched` (lifecycle coordinator, update window, cron),
 `internal/pz` (ini/launch codecs, supervisor, RCON), `internal/steam`,
 `internal/mods`, `internal/backup`, `internal/sys`, `internal/store`,
-`internal/devfake`, `web/` (React 19 + Tailwind 4 + shadcn/ui).
+`internal/devfake`, `web/` (React 19 + Tailwind 4 + shadcn/ui),
+`launcher/` (Wails v3, its own Go module).
