@@ -25,6 +25,19 @@ func TestOpenPerOS(t *testing.T) {
 	require.Equal(t, filepath.Join(lin, "projectzomboid.jar"), in.Jar())
 	require.Equal(t, []string{filepath.Join(lin, "projectzomboid.sh"), "-nosteam"}, in.Command().Args)
 
+	// Steam's Linux layout (42.x): the script at the root, the game one level down.
+	nested := t.TempDir()
+	touch(t, nested, "projectzomboid.sh")
+	touch(t, nested, "projectzomboid", "projectzomboid.jar")
+	touch(t, nested, "projectzomboid", "ProjectZomboid64")
+	for _, pick := range []string{nested, filepath.Join(nested, "projectzomboid")} {
+		in, err = open(pick, "linux")
+		require.NoError(t, err, pick)
+		require.Equal(t, nested, in.Dir)
+		require.Equal(t, filepath.Join(nested, "projectzomboid", "projectzomboid.jar"), in.Jar())
+		require.Equal(t, []string{filepath.Join(nested, "projectzomboid.sh"), "-nosteam"}, in.Command().Args)
+	}
+
 	win := t.TempDir()
 	touch(t, win, "ProjectZomboid64.exe")
 	touch(t, win, "java", "projectzomboid.jar")
