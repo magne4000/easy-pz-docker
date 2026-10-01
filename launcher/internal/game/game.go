@@ -27,11 +27,16 @@ var ErrInvalid = errors.New("this folder does not contain Project Zomboid")
 func Open(dir string) (Install, error) { return open(dir, runtime.GOOS) }
 
 func open(dir, goos string) (Install, error) {
-	in := Install{Dir: filepath.Clean(dir), goos: goos}
-	if in.Jar() == "" || !fileExists(in.executable()) {
-		return Install{}, ErrInvalid
+	dir = filepath.Clean(dir)
+	// Linux installs keep the game in a projectzomboid/ subfolder next to the
+	// launch script; accept that subfolder too.
+	for _, d := range []string{dir, filepath.Dir(dir)} {
+		in := Install{Dir: d, goos: goos}
+		if in.Jar() != "" && fileExists(in.executable()) {
+			return in, nil
+		}
 	}
-	return in, nil
+	return Install{}, ErrInvalid
 }
 
 func (in Install) Jar() string {
@@ -47,7 +52,11 @@ func (in Install) jarCandidates() []string {
 	if in.goos == "darwin" {
 		return []string{filepath.Join(in.Dir, macBundle, "Contents", "Java", "projectzomboid.jar")}
 	}
-	return []string{filepath.Join(in.Dir, "projectzomboid.jar"), filepath.Join(in.Dir, "java", "projectzomboid.jar")}
+	return []string{
+		filepath.Join(in.Dir, "projectzomboid.jar"),
+		filepath.Join(in.Dir, "projectzomboid", "projectzomboid.jar"),
+		filepath.Join(in.Dir, "java", "projectzomboid.jar"),
+	}
 }
 
 func (in Install) executable() string {
