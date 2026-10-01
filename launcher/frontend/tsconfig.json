@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["./src/*"],
+      "@bindings/*": ["./bindings/github.com/magne4000/easy-pz-docker/*"]
+    }
+  },
+  "include": ["src", "bindings", "vite.config.ts"]
+}

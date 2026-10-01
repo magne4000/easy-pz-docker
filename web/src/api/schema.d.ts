@@ -1144,8 +1144,16 @@ export interface components {
             /** Format: int64 */
             maxTotalBytes: number;
         };
+        PublicConnect: {
+            host: string;
+            /** Format: int64 */
+            port: number;
+        };
         PublicData: {
             collection?: components["schemas"]["PublicLink"];
+            connect?: components["schemas"]["PublicConnect"];
+            /** @description Server's game build, e.g. 42.21 */
+            gameVersion?: string;
             /** Format: date-time */
             generatedAt: string;
             iniName: string;

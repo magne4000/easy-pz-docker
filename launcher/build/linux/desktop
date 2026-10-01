@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=EasyPZ Launcher
+Comment=Keeps Project Zomboid mods in sync with a pzman server and joins it
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/easypz-launcher %u
+Terminal=false
+Type=Application
+Icon=easypz-launcher
+Categories=Utility;
+StartupWMClass=easypz-launcher
+
+ 

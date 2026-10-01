@@ -1,6 +1,7 @@
 .git
 .dev
 .idea
+.DS_Store
 pzman
 web/node_modules
 internal/webui/dist/*
