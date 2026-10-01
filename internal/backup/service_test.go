@@ -57,3 +57,35 @@ func TestGateIgnoresRewritesWithIdenticalBytes(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, created)
 }
+
+// PZ's save commits vehicles.db even when no row changed (nobody online):
+// only the header's commit counters move, which is not a world change.
+func TestGateIgnoresSQLiteCommitCounters(t *testing.T) {
+	ctx := context.Background()
+	s := seed(t)
+	svc := newService(t, s)
+	db := filepath.Join(s.Root, "Saves/Multiplayer/s/vehicles.db")
+	commit := func(counter byte, row string, at time.Time) {
+		b := make([]byte, 512)
+		copy(b, "SQLite format 3\x00")
+		b[27], b[95] = counter, counter
+		copy(b[sqliteHeaderLen:], row)
+		require.NoError(t, os.WriteFile(db, b, 0o644))
+		require.NoError(t, os.Chtimes(db, at, at))
+	}
+	commit(1, "car", time.Now())
+	first, created, err := svc.Run(ctx, "scheduled", "", false)
+	require.NoError(t, err)
+	require.True(t, created)
+
+	commit(2, "car", time.Now().Add(time.Minute))
+	b, created, err := svc.Run(ctx, "scheduled", "", false)
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, first.ID, b.ID)
+
+	commit(3, "CAR", time.Now().Add(2*time.Minute))
+	_, created, err = svc.Run(ctx, "scheduled", "", false)
+	require.NoError(t, err)
+	require.True(t, created)
+}

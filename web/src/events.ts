@@ -19,7 +19,7 @@ export const eventActions: Record<EventName, Action> = {
   "update:window": { invalidate: [keys.updates, keys.server] },
   "schedules:changed": { invalidate: [keys.schedules] },
   "disk:status": { invalidate: [keys.system] },
-  "config:changed": { invalidate: [keys.config, keys.mods] },
+  "config:changed": { invalidate: [keys.config, keys.mods, keys.backups] },
   "settings:changed": { invalidate: [keys.settings, keys.system, keys.backups] },
   "stream:desync": "all",
 };

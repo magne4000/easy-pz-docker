@@ -7,6 +7,7 @@ import { useAction, useBackup, useBackups } from "@/api/queries";
 import { Confirm } from "@/components/Confirm";
 import { Empty } from "@/components/Empty";
 import { PageHeader } from "@/components/PageHeader";
+import { PauseEmptyWarning } from "@/components/PauseEmptyWarning";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -185,6 +186,7 @@ export default function Backups() {
         )}
         actions={<CreateDialog running={!!d?.status.running} />}
       />
+      <PauseEmptyWarning className="mb-6" />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Card className="gap-1 py-4">
           <CardHeader className="px-4">

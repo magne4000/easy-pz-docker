@@ -10,11 +10,13 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/magne4000/easy-pz-docker/internal/backup"
+	"github.com/magne4000/easy-pz-docker/internal/pz"
 	"github.com/magne4000/easy-pz-docker/internal/store"
 )
 
@@ -39,10 +41,11 @@ func backupView(b store.Backup) BackupView {
 
 type BackupsOutput struct {
 	Body struct {
-		Items     []BackupView   `json:"items"`
-		Status    backup.Summary `json:"status"`
-		Policy    backup.Policy  `json:"policy"`
-		NextRunAt time.Time      `json:"nextRunAt,omitzero"`
+		Items      []BackupView   `json:"items"`
+		Status     backup.Summary `json:"status"`
+		Policy     backup.Policy  `json:"policy"`
+		NextRunAt  time.Time      `json:"nextRunAt,omitzero"`
+		PauseEmpty bool           `json:"pauseEmpty" doc:"the server .ini's PauseEmpty (true when unset); off, the world keeps changing with nobody online and no backup is skipped"`
 	}
 }
 
@@ -80,6 +83,18 @@ func policy(d Deps) backup.Policy {
 	return backup.Policy{Keep: s.BackupKeep, KeepDaily: s.BackupKeepDaily, KeepWeekly: s.BackupKeepWeekly, MaxTotalBytes: int64(s.BackupMaxTotalGB * (1 << 30))}
 }
 
+// pauseEmpty reports the server .ini's PauseEmpty, PZ's default (true) when
+// unset. An unreadable .ini also counts as true: this only drives a warning,
+// and GET /config/ini reports the read error itself.
+func pauseEmpty(d Deps) bool {
+	ini, err := pz.ReadIniFile(iniPath(d))
+	if err != nil {
+		return true
+	}
+	v, _ := ini.Get("PauseEmpty")
+	return !strings.EqualFold(v, "false")
+}
+
 func registerBackups(api huma.API, d Deps) {
 	huma.Register(api, op("list-backups", http.MethodGet, "/backups", "backups", "Backups, newest first"),
 		func(ctx context.Context, _ *struct{}) (*BackupsOutput, error) {
@@ -98,6 +113,7 @@ func registerBackups(api huma.API, d Deps) {
 			}
 			out.Body.Status, out.Body.Policy = st, policy(d)
 			out.Body.NextRunAt, _ = d.Sched.NextInternal()
+			out.Body.PauseEmpty = pauseEmpty(d)
 			return out, nil
 		})
 	huma.Register(api, op("create-backup", http.MethodPost, "/backups", "backups", "Start a manual backup", 409),

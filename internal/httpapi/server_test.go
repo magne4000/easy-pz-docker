@@ -255,6 +255,20 @@ func TestCreateBackupHonoursForceFalse(t *testing.T) {
 	require.Equal(t, []bool{false, true, true}, got)
 }
 
+// PZ pauses an empty server unless the .ini says otherwise: only an explicit
+// PauseEmpty=false may raise the "backups are never skipped" warning.
+func TestPauseEmptyDefaultsToTrue(t *testing.T) {
+	cfg := testConfig()
+	cfg.DataDir = t.TempDir()
+	d := Deps{Cfg: cfg}
+	require.True(t, pauseEmpty(d), "no .ini")
+	for ini, want := range map[string]bool{"Public=true\n": true, "PauseEmpty=true\n": true, "PauseEmpty=false\n": false} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(iniPath(d)), 0o755))
+		require.NoError(t, os.WriteFile(iniPath(d), []byte(ini), 0o644))
+		require.Equal(t, want, pauseEmpty(d), ini)
+	}
+}
+
 func TestSandboxEndpoints(t *testing.T) {
 	cfg := testConfig()
 	cfg.DataDir = t.TempDir()

@@ -6,6 +6,7 @@ import { api, type Schemas, unwrap } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useAction, useSettings, useSystem } from "@/api/queries";
 import { PageHeader } from "@/components/PageHeader";
+import { PauseEmptyWarning } from "@/components/PauseEmptyWarning";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -90,6 +91,7 @@ export default function Settings() {
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <PauseEmptyWarning className="sm:col-span-2" />
             <NumberField
               id="bi"
               label={t("Every (minutes)")}
