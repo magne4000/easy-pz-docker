@@ -113,10 +113,11 @@ func TestSandboxModOptions(t *testing.T) {
 	require.False(t, changed, "the default needs no line")
 	require.Equal(t, string(src), string(d.Bytes()))
 
-	for k, v := range map[string]string{"RainCleansBlood.Mode": "3", "NewMod.Rate": "2", "NewMod.Enabled": "false"} {
-		changed, err := set(k, v)
-		require.NoError(t, err, k)
-		require.True(t, changed, k)
+	// In order: the second option of a new table goes into the table the first created.
+	for _, kv := range [][2]string{{"RainCleansBlood.Mode", "3"}, {"NewMod.Rate", "2"}, {"NewMod.Enabled", "false"}} {
+		changed, err := set(kv[0], kv[1])
+		require.NoError(t, err, kv[0])
+		require.True(t, changed, kv[0])
 	}
 	out := string(d.Bytes())
 	require.Contains(t, out, "        AlsoCleanAsh = true,\n        Mode = 3,\n    },\n    SomeMod = {\n")
