@@ -34,33 +34,46 @@ func TestSandboxEntries(t *testing.T) {
 		keys = append(keys, e.Key)
 	}
 	require.Equal(t, []string{"VERSION", "Zombies", "LockedHouses", "WaterShutModifier", "WorldItemRemovalList", "MultiHitZombies",
-		"ZombieLore.Speed", "ZombieConfig.PopulationMultiplier", "SomeMod.Nested.Flag"}, keys)
+		"ZombieLore.Speed", "ZombieConfig.PopulationMultiplier", "RainCleansBlood.TilesPerMinuteNearPlayer",
+		"RainCleansBlood.AlsoCleanAsh", "SomeMod.Nested.Flag"}, keys)
 
 	z := byKey["Zombies"]
 	require.Equal(t, SandboxInt, z.Kind)
-	require.Equal(t, `Changing this sets the "Population Multiplier" advanced option.`, z.Description)
+	require.Equal(t, `Changing this also sets the "Population Multiplier" in Advanced Zombie Options.`, z.Description)
 	require.Equal(t, "4", z.Default, "enum defaults resolve to the option value")
-	require.Len(t, z.Options, 6)
-	require.Equal(t, SandboxOption{Value: 6}, z.Options[5], "the undescribed last choice")
-
-	// PZ omits the last choice; an unmatched default label names it.
-	lh := byKey["LockedHouses"]
-	require.Equal(t, SandboxOption{Value: 3, Label: "Very Often"}, lh.Options[2])
-	require.Len(t, lh.Options, 3)
-	require.Equal(t, "3", lh.Default)
+	require.Len(t, z.Options, 6, "B42 servers list every choice")
+	require.Equal(t, SandboxOption{Value: 6, Label: "None"}, z.Options[5])
+	require.Equal(t, "6", byKey["LockedHouses"].Default)
 
 	w := byKey["WaterShutModifier"]
 	require.Equal(t, -1.0, *w.Min)
+	require.Equal(t, 2147483647.0, *w.Max)
 	require.Equal(t, "14", w.Default)
-	require.Equal(t, "Days before water is shut off.", w.Description)
+	require.Equal(t, "How long after the default start date (July 9, 1993) that plumbing fixtures (eg. sinks) stop being infinite sources of water.", w.Description)
 
 	p := byKey["ZombieConfig.PopulationMultiplier"]
 	require.Equal(t, SandboxFloat, p.Kind)
 	require.Equal(t, 4.0, *p.Max)
+	require.Equal(t, "0.65", p.Default)
 
 	require.Equal(t, SandboxString, byKey["WorldItemRemovalList"].Kind)
-	require.Equal(t, "Base.Hat,Base.Glasses", byKey["WorldItemRemovalList"].Value)
+	require.Equal(t, "Base.Hat, Base.Glasses", byKey["WorldItemRemovalList"].Value)
 	require.Equal(t, SandboxBool, byKey["SomeMod.Nested.Flag"].Kind)
+}
+
+// B41 servers wrote "Default=<label>" and left the last choice out of the
+// list; the default naming it brings it back.
+func TestSandboxEntriesB41Comments(t *testing.T) {
+	d := loadSandbox(t, []byte("SandboxVars = {\n    -- Locked doors. Default=Very Often\n    -- 1 = Never\n    -- 2 = Rare\n    LockedHouses = 3,\n"+
+		"    -- Days. Minimum=-1 Maximum=10 Default=4\n    Days = 4,\n}\n"))
+	lh := d.Entries()[0]
+	require.Equal(t, []SandboxOption{{1, "Never"}, {2, "Rare"}, {3, "Very Often"}}, lh.Options)
+	require.Equal(t, "3", lh.Default)
+	require.Equal(t, "Locked doors.", lh.Description)
+	days := d.Entries()[1]
+	require.Equal(t, -1.0, *days.Min)
+	require.Equal(t, 10.0, *days.Max)
+	require.Equal(t, "4", days.Default)
 }
 
 func TestSandboxSet(t *testing.T) {
@@ -96,8 +109,8 @@ func TestSandboxSet(t *testing.T) {
 		require.ErrorIs(t, set(k, v), ErrSandboxValue, k)
 	}
 	require.ErrorIs(t, set("Nope", "1"), ErrSandboxUnknownKey)
-	require.ErrorIs(t, set("VERSION", "6"), ErrSandboxValue, "VERSION is the game's")
-	require.NoError(t, set("VERSION", "5"), "resending the current value is fine")
+	require.ErrorIs(t, set("VERSION", "5"), ErrSandboxValue, "VERSION is the game's")
+	require.NoError(t, set("VERSION", "6"), "resending the current value is fine")
 }
 
 func TestSandboxMalformed(t *testing.T) {

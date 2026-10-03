@@ -1,32 +1,43 @@
 SandboxVars = {
-    VERSION = 5,
-    -- Changing this sets the "Population Multiplier" advanced option. Default=Normal
+    VERSION = 6,
+    -- Changing this also sets the "Population Multiplier" in Advanced Zombie Options. Default = Normal
     -- 1 = Insane
     -- 2 = Very High
     -- 3 = High
     -- 4 = Normal
     -- 5 = Low
+    -- 6 = None
     Zombies = 4,
-    -- How frequently homes and buildings will be discovered locked Default=Very Often
+    -- How frequently the doors of homes and buildings will be locked when discovered. Default = Very Often
     -- 1 = Never
-    -- 2 = Rare
-    LockedHouses = 3,
-    -- Days before water is shut off. Minimum=-1 Maximum=2147483647 Default=14
+    -- 2 = Extremely Rare
+    -- 3 = Rare
+    -- 4 = Sometimes
+    -- 5 = Often
+    -- 6 = Very Often
+    LockedHouses = 6,
+    -- How long after the default start date (July 9, 1993) that plumbing fixtures (eg. sinks) stop being infinite sources of water. Min: -1 Max: 2147483647 Default: 14
     WaterShutModifier = 14,
-    -- A comma-separated list of item types that will be removed. 
-    WorldItemRemovalList = "Base.Hat,Base.Glasses",
-    -- When enabled certain melee weapons will be able to strike multiple zombies in one hit.
+    -- A comma-separated list of item types that will be removed after HoursForWorldItemRemoval hours.
+    WorldItemRemovalList = "Base.Hat, Base.Glasses",
+    -- If certain melee weapons will be able to strike multiple zombies in one hit.
     MultiHitZombies = false,
     ZombieLore = {
-        -- Controls the zombie movement rate. Default=Fast Shamblers
+        -- How fast zombies move. Default = Random
         -- 1 = Sprinters
         -- 2 = Fast Shamblers
         -- 3 = Shamblers
-        Speed = 2,
+        -- 4 = Random
+        Speed = 4,
     },
     ZombieConfig = {
-        -- Set by the "Zombie Count" population option. Minimum=0.00 Maximum=4.00 Default=1.00
-        PopulationMultiplier = 1.0,
+        -- Set by the "Zombie Count" population option, or by a custom number here. Insane = 2.5, Very High = 1.6, High = 1.2, Normal = 0.65, Low = 0.15, None = 0.0. Min: 0.00 Max: 4.00 Default: 0.65
+        PopulationMultiplier = 0.65,
+    },
+    RainCleansBlood = {
+        -- Min: 10 Max: 2000 Default: 300
+        TilesPerMinuteNearPlayer = 300,
+        AlsoCleanAsh = true,
     },
     SomeMod = {
         Nested = {

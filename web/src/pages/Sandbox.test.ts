@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Schemas } from "@/api/client";
-import { choices, problem } from "./Sandbox";
+import { choices, differsFromDefault, group, problem } from "./Sandbox";
 
 const entry = (e: Partial<Schemas["SandboxEntryView"]>): Schemas["SandboxEntryView"] => ({
   key: "K",
   value: "1",
   kind: "int",
+  label: "",
+  page: "",
   description: "",
   default: "",
   options: [],
@@ -39,5 +41,23 @@ describe("choices", () => {
       { value: "2", label: "2 (not described)" },
     ]);
     expect(choices(entry({}), "1")).toEqual([]);
+  });
+});
+
+describe("differsFromDefault", () => {
+  it("compares numbers by value and ignores unknown defaults", () => {
+    const f = entry({ kind: "float", default: "0.80" });
+    expect(differsFromDefault(f, "0.8")).toBe(false);
+    expect(differsFromDefault(f, "0.81")).toBe(true);
+    expect(differsFromDefault(entry({ kind: "string", default: "a" }), "a ")).toBe(true);
+    expect(differsFromDefault(entry({ default: "" }), "5")).toBe(false);
+  });
+});
+
+describe("group", () => {
+  it("groups mod options by editor page, others by table", () => {
+    expect(group(entry({ key: "Mod.Opt", page: "My Mod" }))).toEqual({ title: "My Mod", table: "Mod" });
+    expect(group(entry({ key: "ZombieLore.Speed" }))).toEqual({ title: "ZombieLore", table: "ZombieLore" });
+    expect(group(entry({ key: "Zombies" }))).toEqual({ title: "", table: "" });
   });
 });

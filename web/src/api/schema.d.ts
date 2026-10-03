@@ -1211,25 +1211,30 @@ export interface components {
             response: string;
         };
         SandboxEntryView: {
-            /** @description as documented in the file's comments; empty when unknown */
+            /** @description from the file's comments, or the mod's sandbox-options.txt; empty when unknown */
             default: string;
             description: string;
             /** @description dotted path below SandboxVars, e.g. ZombieLore.Speed */
             key: string;
             /** @enum {string} */
             kind: "bool" | "int" | "float" | "string";
+            /** @description mod options: the name the game's sandbox editor shows; empty when unknown */
+            label: string;
             /** Format: double */
             max?: number;
             /** Format: double */
             min?: number;
-            /** @description documented choices; values outside them are allowed */
+            /** @description choices; for the game's own options, values outside them are allowed */
             options: components["schemas"]["SandboxOption"][] | null;
+            /** @description mod options: the game's sandbox editor page listing it; empty for the game's own options and unlisted ones */
+            page: string;
             /** @description managed by the game (VERSION) */
             readOnly: boolean;
+            /** @description a mod option the file lacks yet shows its default */
             value: string;
         };
         SandboxOption: {
-            /** @description empty when the file does not describe this choice */
+            /** @description empty when neither the file nor the mod describes this choice */
             label: string;
             /** Format: int64 */
             value: number;
@@ -1244,6 +1249,8 @@ export interface components {
             entries: components["schemas"]["SandboxEntryView"][] | null;
             exists: boolean;
             path: string;
+            /** @description enabled mods' sandbox files that could not be read, wholly or partly */
+            problems: string[] | null;
         };
         SandboxUpdateInputBody: {
             /**
@@ -1252,7 +1259,7 @@ export interface components {
              * @example /api/schemas/SandboxUpdateInputBody.json
              */
             readonly $schema?: string;
-            /** @description key → new value; only existing keys can be set */
+            /** @description key → new value; keys in the file or declared by an enabled mod */
             values: {
                 [key: string]: string;
             };

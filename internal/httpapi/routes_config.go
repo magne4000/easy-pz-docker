@@ -15,6 +15,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/magne4000/easy-pz-docker/internal/events"
+	"github.com/magne4000/easy-pz-docker/internal/mods"
 	"github.com/magne4000/easy-pz-docker/internal/pz"
 	"github.com/magne4000/easy-pz-docker/internal/steam"
 )
@@ -54,27 +55,30 @@ type IniUpdateOutput struct {
 
 type SandboxEntryView struct {
 	Key         string             `json:"key" doc:"dotted path below SandboxVars, e.g. ZombieLore.Speed"`
-	Value       string             `json:"value"`
+	Value       string             `json:"value" doc:"a mod option the file lacks yet shows its default"`
 	Kind        pz.SandboxKind     `json:"kind" enum:"bool,int,float,string"`
+	Label       string             `json:"label" doc:"mod options: the name the game's sandbox editor shows; empty when unknown"`
+	Page        string             `json:"page" doc:"mod options: the game's sandbox editor page listing it; empty for the game's own options and unlisted ones"`
 	Description string             `json:"description"`
-	Default     string             `json:"default" doc:"as documented in the file's comments; empty when unknown"`
+	Default     string             `json:"default" doc:"from the file's comments, or the mod's sandbox-options.txt; empty when unknown"`
 	Min         *float64           `json:"min,omitempty"`
 	Max         *float64           `json:"max,omitempty"`
-	Options     []pz.SandboxOption `json:"options" doc:"documented choices; values outside them are allowed"`
+	Options     []pz.SandboxOption `json:"options" doc:"choices; for the game's own options, values outside them are allowed"`
 	ReadOnly    bool               `json:"readOnly" doc:"managed by the game (VERSION)"`
 }
 
 type SandboxOutput struct {
 	Body struct {
-		Path    string             `json:"path"`
-		Exists  bool               `json:"exists"`
-		Entries []SandboxEntryView `json:"entries"`
+		Path     string             `json:"path"`
+		Exists   bool               `json:"exists"`
+		Entries  []SandboxEntryView `json:"entries"`
+		Problems []string           `json:"problems" doc:"enabled mods' sandbox files that could not be read, wholly or partly"`
 	}
 }
 
 type SandboxUpdateInput struct {
 	Body struct {
-		Values map[string]string `json:"values" doc:"key → new value; only existing keys can be set"`
+		Values map[string]string `json:"values" doc:"key → new value; keys in the file or declared by an enabled mod"`
 	}
 }
 
@@ -101,6 +105,22 @@ type PathsOutput struct {
 
 func sandboxPath(d Deps) string {
 	return filepath.Join(d.Cfg.DataDir, "Server", d.Cfg.ServerName+"_SandboxVars.lua")
+}
+
+// readSandbox reads the SandboxVars file with the enabled mods' options, as
+// the game's sandbox editor lists them.
+func readSandbox(ctx context.Context, d Deps) (*pz.Sandbox, []error, error) {
+	sb, err := pz.ReadSandboxFile(sandboxPath(d))
+	if err != nil {
+		return nil, nil, err
+	}
+	enabled, _, err := d.Mods.Enabled(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	s := mods.LoadSandboxSchema(d.Cfg.InstallDir, enabled)
+	sb.ApplyModOptions(s.Options, s.Text)
+	return sb, s.Problems, nil
 }
 
 func iniPath(d Deps) string {
@@ -195,8 +215,8 @@ func registerConfig(api huma.API, d Deps) {
 	huma.Register(api, op("get-sandbox", http.MethodGet, "/config/sandbox", "config", "The SandboxVars.lua options as structured entries"),
 		func(ctx context.Context, _ *struct{}) (*SandboxOutput, error) {
 			out := &SandboxOutput{}
-			out.Body.Path, out.Body.Entries = sandboxPath(d), []SandboxEntryView{}
-			sb, err := pz.ReadSandboxFile(sandboxPath(d))
+			out.Body.Path, out.Body.Entries, out.Body.Problems = sandboxPath(d), []SandboxEntryView{}, []string{}
+			sb, problems, err := readSandbox(ctx, d)
 			if errors.Is(err, fs.ErrNotExist) {
 				return out, nil
 			}
@@ -205,15 +225,18 @@ func registerConfig(api huma.API, d Deps) {
 			}
 			out.Body.Exists = true
 			for _, e := range sb.Entries() {
-				out.Body.Entries = append(out.Body.Entries, SandboxEntryView{Key: e.Key, Value: e.Value, Kind: e.Kind, Description: e.Description,
-					Default: e.Default, Min: e.Min, Max: e.Max, Options: append([]pz.SandboxOption{}, e.Options...), ReadOnly: e.ReadOnly})
+				out.Body.Entries = append(out.Body.Entries, SandboxEntryView{Key: e.Key, Value: e.Value, Kind: e.Kind, Label: e.Label, Page: e.Page,
+					Description: e.Description, Default: e.Default, Min: e.Min, Max: e.Max, Options: append([]pz.SandboxOption{}, e.Options...), ReadOnly: e.ReadOnly})
+			}
+			for _, p := range problems {
+				out.Body.Problems = append(out.Body.Problems, p.Error())
 			}
 			return out, nil
 		})
 	huma.Register(api, op("update-sandbox", http.MethodPut, "/config/sandbox", "config", "Save SandboxVars.lua values; they apply at the next start", 404, 422),
 		func(ctx context.Context, in *SandboxUpdateInput) (*SandboxUpdateOutput, error) {
 			p := sandboxPath(d)
-			sb, err := pz.ReadSandboxFile(p)
+			sb, _, err := readSandbox(ctx, d)
 			if errors.Is(err, fs.ErrNotExist) {
 				return nil, huma.Error404NotFound("the game has not created " + filepath.Base(p) + " yet")
 			}

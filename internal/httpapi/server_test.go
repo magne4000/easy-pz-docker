@@ -25,6 +25,8 @@ import (
 	"github.com/magne4000/easy-pz-docker/internal/backup"
 	"github.com/magne4000/easy-pz-docker/internal/console"
 	"github.com/magne4000/easy-pz-docker/internal/events"
+	"github.com/magne4000/easy-pz-docker/internal/mods"
+	"github.com/magne4000/easy-pz-docker/internal/pz"
 	"github.com/magne4000/easy-pz-docker/internal/sched"
 	"github.com/magne4000/easy-pz-docker/internal/settings"
 	"github.com/magne4000/easy-pz-docker/internal/steam"
@@ -41,6 +43,11 @@ func testConfig() app.Config {
 }
 
 func newServer(t *testing.T, cfg app.Config) *fiber.App {
+	a, _ := newServerDB(t, cfg)
+	return a
+}
+
+func newServerDB(t *testing.T, cfg app.Config) (*fiber.App, *store.DB) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, slog.Default(), filepath.Join(t.TempDir(), "t.db"))
@@ -51,9 +58,27 @@ func newServer(t *testing.T, cfg app.Config) *fiber.App {
 	require.NoError(t, err)
 	ring := console.NewRing(10)
 	ring.Append("hello")
-	s, err := New(cfg, slog.New(slog.NewTextHandler(io.Discard, nil)), Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st})
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ms := mods.NewService(mods.Options{InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName,
+		DB: db, CMD: contentCMD{install: cfg.InstallDir}, Bus: bus, Log: log})
+	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms})
 	require.NoError(t, err)
-	return s.App()
+	return s.App(), db
+}
+
+// contentCMD reports every workshop item under the install dir as downloaded.
+type contentCMD struct {
+	steam.CMD
+	install string
+}
+
+func (c contentCMD) WorkshopInstalled(context.Context) (map[string]steam.WorkshopItemState, error) {
+	out := map[string]steam.WorkshopItemState{}
+	es, _ := os.ReadDir(steam.WorkshopContentRoot(c.install))
+	for _, e := range es {
+		out[e.Name()] = steam.WorkshopItemState{ID: e.Name()}
+	}
+	return out, nil
 }
 
 type client struct {
@@ -271,12 +296,26 @@ func TestPauseEmptyDefaultsToTrue(t *testing.T) {
 
 func TestSandboxEndpoints(t *testing.T) {
 	cfg := testConfig()
-	cfg.DataDir = t.TempDir()
-	c := newClient(t, cfg)
+	cfg.DataDir, cfg.InstallDir = t.TempDir(), t.TempDir()
+	a, db := newServerDB(t, cfg)
+	c := &client{t: t, app: a, cookies: map[string]string{}}
 	c.login()
 	put := func(body string) *http.Response {
 		return c.do(http.MethodPut, "/api/config/sandbox", body, csrfHeader, c.cookies[csrfCookie])
 	}
+
+	// An enabled mod whose options the server has not written yet.
+	mod := filepath.Join(steam.WorkshopContentDir(cfg.InstallDir, "100"), "mods", "RCB", "42")
+	for name, content := range map[string]string{
+		"mod.info":                 "id=RCB\n",
+		"media/sandbox-options.txt": "VERSION = 1,\noption RCB.Mode { type = enum, numValues = 3, default = 2, page = RCB, translation = RCB_Mode, }",
+		"media/lua/shared/Translate/EN/Sandbox.json": `{"Sandbox_RCB": "Rain Cleans Blood", "Sandbox_RCB_Mode": "Mode", "Sandbox_RCB_Mode_option3": "Always"}`,
+	} {
+		require.NoError(t, os.MkdirAll(filepath.Dir(filepath.Join(mod, name)), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(mod, name), []byte(content), 0o644))
+	}
+	_, err := db.AddItem(context.Background(), "100", time.Now())
+	require.NoError(t, err)
 
 	resp := c.do(http.MethodGet, "/api/config/sandbox", "")
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -285,26 +324,34 @@ func TestSandboxEndpoints(t *testing.T) {
 	require.False(t, out.Body.Exists)
 	require.Equal(t, http.StatusNotFound, put(`{"values":{"Zombies":"3"}}`).StatusCode)
 
-	src := "SandboxVars = {\n    -- Minimum=0.00 Maximum=4.00 Default=1.00\n    Rate = 1.0,\n    Flag = false,\n}\n"
+	src := "SandboxVars = {\n    -- Min: 0.00 Max: 4.00 Default: 1.00\n    Rate = 1.0,\n    Flag = false,\n}\n"
 	p := filepath.Join(cfg.DataDir, "Server", "s_SandboxVars.lua")
 	require.NoError(t, os.MkdirAll(filepath.Dir(p), 0o755))
 	require.NoError(t, os.WriteFile(p, []byte(src), 0o644))
 
 	resp = c.do(http.MethodGet, "/api/config/sandbox", "")
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&out.Body))
-	require.Len(t, out.Body.Entries, 2)
+	require.Len(t, out.Body.Entries, 3)
 	require.Equal(t, 4.0, *out.Body.Entries[0].Max)
+	m := out.Body.Entries[2]
+	require.Equal(t, "RCB.Mode", m.Key)
+	require.Equal(t, "2", m.Value, "the mod's default")
+	require.Equal(t, "Mode", m.Label)
+	require.Equal(t, "Rain Cleans Blood", m.Page)
+	require.Equal(t, []pz.SandboxOption{{Value: 1}, {Value: 2}, {Value: 3, Label: "Always"}}, m.Options)
+	require.Empty(t, out.Body.Problems)
 
 	require.Equal(t, http.StatusUnprocessableEntity, put(`{"values":{"Rate":"9"}}`).StatusCode)
 	require.Equal(t, http.StatusUnprocessableEntity, put(`{"values":{"Nope":"1"}}`).StatusCode)
+	require.Equal(t, http.StatusUnprocessableEntity, put(`{"values":{"RCB.Mode":"4"}}`).StatusCode)
 	b, _ := os.ReadFile(p)
 	require.Equal(t, src, string(b), "a rejected update writes nothing")
 
-	resp = put(`{"values":{"Rate":"2.5","Flag":"false"}}`)
+	resp = put(`{"values":{"Rate":"2.5","Flag":"false","RCB.Mode":"3"}}`)
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	var upd SandboxUpdateOutput
 	require.NoError(t, json.NewDecoder(resp.Body).Decode(&upd.Body))
-	require.Equal(t, []string{"Rate"}, upd.Body.Changed)
+	require.Equal(t, []string{"RCB.Mode", "Rate"}, upd.Body.Changed)
 	b, _ = os.ReadFile(p)
-	require.Equal(t, strings.Replace(src, "Rate = 1.0", "Rate = 2.5", 1), string(b))
+	require.Equal(t, strings.Replace(src, "Rate = 1.0,\n    Flag = false,\n", "Rate = 2.5,\n    Flag = false,\n    RCB = {\n        Mode = 3,\n    },\n", 1), string(b))
 }
