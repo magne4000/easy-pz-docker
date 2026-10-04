@@ -908,8 +908,6 @@ export interface components {
             sha256: string;
             /** Format: int64 */
             size: number;
-            /** @description SQLite databases only: sha256 with the header's commit counters zeroed */
-            sqliteSha256?: string;
         };
         Fingerprint: {
             /** Format: int64 */

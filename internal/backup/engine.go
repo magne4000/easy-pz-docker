@@ -2,14 +2,12 @@ package backup
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -57,9 +55,6 @@ type FileEntry struct {
 	Mode    uint32    `json:"mode"`
 	ModTime time.Time `json:"modTime"`
 	SHA256  string    `json:"sha256"`
-	// SQLiteSHA256 lets the backup gate see through commits that rewrote
-	// identical rows: they still bump the database header's counters.
-	SQLiteSHA256 string `json:"sqliteSha256,omitempty" doc:"SQLite databases only: sha256 with the header's commit counters zeroed"`
 }
 
 type ModRef struct {
@@ -137,9 +132,9 @@ func walk(s Set) ([]walked, Fingerprint, error) {
 }
 
 // sameContent reports whether the walked files hold the bytes the entries (a
-// backup's manifest) recorded, SQLite commit counters aside. Only files whose
-// mtime moved are read: PZ's save rewrites files with identical bytes, which
-// the mtime-based fingerprint alone cannot tell from a change.
+// backup's manifest) recorded, world databases aside (see gateIgnores). Only
+// files whose mtime moved are read: PZ's save rewrites files with identical
+// bytes, which the mtime-based fingerprint alone cannot tell from a change.
 func sameContent(ctx context.Context, root string, files []walked, entries []FileEntry) (bool, error) {
 	if len(files) != len(entries) {
 		return false, nil
@@ -148,10 +143,15 @@ func sameContent(ctx context.Context, root string, files []walked, entries []Fil
 	for _, e := range entries {
 		byPath[e.Path] = e
 	}
-	h := newFileHash()
 	for _, f := range files {
 		e, ok := byPath[f.rel]
-		if !ok || e.Size != f.info.Size() {
+		if !ok {
+			return false, nil
+		}
+		if gateIgnores(f.rel) {
+			continue
+		}
+		if e.Size != f.info.Size() {
 			return false, nil
 		}
 		if f.info.ModTime().Equal(e.ModTime) {
@@ -160,88 +160,42 @@ func sameContent(ctx context.Context, root string, files []walked, entries []Fil
 		if err := ctx.Err(); err != nil {
 			return false, err
 		}
-		err := hashFile(h, filepath.Join(root, filepath.FromSlash(f.rel)))
+		sum, err := hashFile(filepath.Join(root, filepath.FromSlash(f.rel)))
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
 		}
 		if err != nil {
 			return false, err
 		}
-		sum, sqliteSum := h.sums()
-		if sum != e.SHA256 && (e.SQLiteSHA256 == "" || sqliteSum != e.SQLiteSHA256) {
+		if sum != e.SHA256 {
 			return false, nil
 		}
 	}
 	return true, nil
 }
 
-func hashFile(h *fileHash, p string) error {
+// gateIgnores reports whether the backup gate disregards a file's content:
+// the world's SQLite databases (vehicles.db, players.db). PZ's save commits
+// them with nobody online, moving header counters and reshuffling pages
+// without changing a row. Play cannot go unseen: it advances the game clock,
+// which the save writes to map_t.bin. The account db (db/<name>.db) is
+// outside the world and stays compared: console commands change it while the
+// clock is paused.
+func gateIgnores(rel string) bool {
+	return strings.HasPrefix(rel, "Saves/") && strings.HasSuffix(rel, ".db")
+}
+
+func hashFile(p string) (string, error) {
 	f, err := os.Open(p)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer f.Close()
-	h.Reset()
-	_, err = io.Copy(h, f)
-	return err
-}
-
-// A SQLite database starts with a 100-byte header whose file change counter
-// (offset 24) and version-valid-for number (offset 92) move on every commit,
-// even one rewriting identical rows: PZ's save does that to vehicles.db.
-const sqliteHeaderLen = 100
-
-var sqliteMagic = []byte("SQLite format 3\x00")
-
-// fileHash hashes a stream and, when it is a SQLite database, also the same
-// bytes with the header's commit counters zeroed.
-type fileHash struct {
-	raw      hash.Hash
-	sqlite   hash.Hash // allocated on the first SQLite stream
-	isSQLite bool
-	head     [sqliteHeaderLen]byte
-	n        int // bytes of head filled
-}
-
-func newFileHash() *fileHash { return &fileHash{raw: sha256.New()} }
-
-func (h *fileHash) Reset() {
-	h.raw.Reset()
-	h.isSQLite, h.n = false, 0
-}
-
-func (h *fileHash) Write(p []byte) (int, error) {
-	h.raw.Write(p)
-	rest := p
-	if h.n < len(h.head) {
-		k := copy(h.head[h.n:], p)
-		h.n += k
-		rest = p[k:]
-		if h.n == len(h.head) && bytes.HasPrefix(h.head[:], sqliteMagic) {
-			if h.sqlite == nil {
-				h.sqlite = sha256.New()
-			}
-			h.sqlite.Reset()
-			clear(h.head[24:28])
-			clear(h.head[92:96])
-			h.sqlite.Write(h.head[:])
-			h.isSQLite = true
-		}
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	if h.isSQLite {
-		h.sqlite.Write(rest)
-	}
-	return len(p), nil
-}
-
-// sums returns the hex sha256 of the bytes, and the counter-blind one for a
-// SQLite database ("" otherwise).
-func (h *fileHash) sums() (raw, sqlite string) {
-	raw = hex.EncodeToString(h.raw.Sum(nil))
-	if h.isSQLite {
-		sqlite = hex.EncodeToString(h.sqlite.Sum(nil))
-	}
-	return raw, sqlite
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 type zeroReader struct{}
@@ -277,7 +231,7 @@ func Create(ctx context.Context, s Set, dst string, m Manifest, onProgress func(
 	}
 	tw := tar.NewWriter(zw)
 	var done int64
-	h := newFileHash()
+	h := sha256.New()
 	for _, f := range files {
 		if err := ctx.Err(); err != nil {
 			return m, 0, err
@@ -301,8 +255,7 @@ func Create(ctx context.Context, s Set, dst string, m Manifest, onProgress func(
 			return m, 0, fmt.Errorf("backup: %s: %w", f.rel, cerr)
 		}
 		done += size
-		sum, sqliteSum := h.sums()
-		m.Files = append(m.Files, FileEntry{Path: f.rel, Size: size, Mode: uint32(f.info.Mode().Perm()), ModTime: f.info.ModTime().UTC(), SHA256: sum, SQLiteSHA256: sqliteSum})
+		m.Files = append(m.Files, FileEntry{Path: f.rel, Size: size, Mode: uint32(f.info.Mode().Perm()), ModTime: f.info.ModTime().UTC(), SHA256: hex.EncodeToString(h.Sum(nil))})
 		onProgress(Progress{DoneBytes: done, TotalBytes: fp.TotalSize, File: f.rel})
 	}
 	mj, err := json.MarshalIndent(m, "", "  ")
