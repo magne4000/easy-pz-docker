@@ -167,6 +167,9 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		out.StatusMessage = statusMessages[out.Status]
 		out.Connect = publicConnect(d)
 		out.Launcher = publicLauncher(d)
+		if o := d.Cfg.PublicOrigin(); o != "" {
+			out.PageURL = o + base
+		}
 		out.GameVersion = serverGameVersion.get(serverJar(d))
 		if out.Status == "available" {
 			if p := d.Coord.Players(c.Context()); p.Count != nil {

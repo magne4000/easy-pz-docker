@@ -1161,6 +1161,8 @@ export interface components {
             mapLine: string;
             modsLine: string;
             pack: components["schemas"]["PublicPack"];
+            /** @description This page's address under PANEL_PUBLIC_URL; omitted when unset */
+            pageUrl?: string;
             /** Format: int64 */
             players: number | null;
             serverName: string;

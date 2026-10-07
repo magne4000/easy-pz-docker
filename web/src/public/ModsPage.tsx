@@ -76,7 +76,7 @@ const platformLabel: Record<string, string> = {
   "linux-arm64": "Linux ARM64",
 };
 
-function LauncherCard({ launcher }: { launcher: Launcher }) {
+function LauncherCard({ launcher, pageUrl }: { launcher: Launcher; pageUrl: string }) {
   const { t } = useTranslation();
   return (
     <Card>
@@ -104,7 +104,7 @@ function LauncherCard({ launcher }: { launcher: Launcher }) {
           </li>
           <li className="space-y-2">
             <p>{t("Open it and add this server with this page's link:")}</p>
-            <CopyBlock text={window.location.origin + window.location.pathname} />
+            <CopyBlock text={pageUrl} />
           </li>
         </ol>
         <a
@@ -198,7 +198,13 @@ export function ModsPage() {
           <TabsTrigger value="host">{t("Running this mod set yourself")}</TabsTrigger>
         </TabsList>
         <TabsContent value="join" className="space-y-4">
-          {data.launcher && <LauncherCard launcher={data.launcher} />}
+          {data.launcher && (
+            <LauncherCard
+              launcher={data.launcher}
+              // PANEL_PUBLIC_URL wins: this tab may be on an address other players can't reach.
+              pageUrl={data.pageUrl ?? window.location.origin + window.location.pathname}
+            />
+          )}
           <Card>
             <CardHeader>
               <CardTitle>

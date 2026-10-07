@@ -11,6 +11,7 @@ type PublicData struct {
 	Players       *int            `json:"players"`
 	Connect       *PublicConnect  `json:"connect,omitempty"`
 	Launcher      *PublicLauncher `json:"launcher,omitempty" doc:"Launcher release of this server's version; omitted in Steam mode and on unreleased builds"`
+	PageURL       string          `json:"pageUrl,omitempty" doc:"This page's address under PANEL_PUBLIC_URL; omitted when unset"`
 	GameVersion   string          `json:"gameVersion,omitempty" doc:"Server's game build, e.g. 42.21"`
 	Collection    *PublicLink     `json:"collection,omitempty"`
 	Items         []PublicItem    `json:"items" nullable:"false"`
