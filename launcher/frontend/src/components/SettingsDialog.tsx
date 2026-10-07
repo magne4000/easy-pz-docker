@@ -1,4 +1,5 @@
-import { CheckCircle2Icon, FolderOpenIcon, TriangleAlertIcon } from "lucide-react";
+import { CheckCircle2Icon, DownloadIcon, FolderOpenIcon, Loader2Icon, TriangleAlertIcon } from "lucide-react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -28,8 +29,74 @@ export function SettingsDialog({
           <DialogDescription>{t("EasyPZ Launcher {{v}}", { v: version })}</DialogDescription>
         </DialogHeader>
         <GameFolder game={game} onChanged={onGameChanged} />
+        <LauncherUpdate />
       </DialogContent>
     </Dialog>
+  );
+}
+
+type Check =
+  | { state: "checking" }
+  | { state: "latest" }
+  | { state: "available"; version: string; url: string }
+  | { state: "error"; message: string };
+
+// Nothing is checked or installed until the player asks.
+function LauncherUpdate() {
+  const { t } = useTranslation();
+  const [check, setCheck] = useState<Check | null>(null);
+  const [updating, setUpdating] = useState(false);
+
+  const run = async () => {
+    setCheck({ state: "checking" });
+    try {
+      const u = await App.CheckUpdate();
+      setCheck(u.available ? { state: "available", version: u.version, url: u.url } : { state: "latest" });
+    } catch (err) {
+      setCheck({ state: "error", message: errorMessage(err) });
+    }
+  };
+
+  const apply = async () => {
+    setUpdating(true);
+    try {
+      await App.ApplyUpdate();
+    } catch (err) {
+      toast.error(errorMessage(err));
+      setUpdating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <Label>{t("Updates")}</Label>
+      {check?.state === "available" ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm">{t("Launcher {{v}} is available", { v: check.version })}</span>
+          <Button size="sm" onClick={apply} disabled={updating}>
+            {updating ? <Loader2Icon className="animate-spin" /> : <DownloadIcon />}
+            {t("Update and restart")}
+          </Button>
+          <Button size="sm" variant="link" onClick={() => App.OpenURL(check.url)}>
+            {t("What's new")}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center gap-3">
+          <Button variant="outline" size="sm" onClick={run} disabled={check?.state === "checking"}>
+            {check?.state === "checking" && <Loader2Icon className="animate-spin" />}
+            {t("Check for updates")}
+          </Button>
+          {check?.state === "latest" && (
+            <span className="flex items-center gap-1.5 text-muted-foreground text-xs">
+              <CheckCircle2Icon className="size-3.5 text-success" />
+              {t("You have the latest version.")}
+            </span>
+          )}
+          {check?.state === "error" && <span className="text-muted-foreground text-xs">{check.message}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 

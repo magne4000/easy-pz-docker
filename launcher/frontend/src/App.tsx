@@ -1,4 +1,4 @@
-import { DownloadIcon, Loader2Icon, PlusIcon, ServerIcon, SettingsIcon } from "lucide-react";
+import { Loader2Icon, PlusIcon, ServerIcon, SettingsIcon } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -13,15 +13,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { App as AppAPI, type Config, type Core, errorMessage, Launcher } from "@/lib/api";
 
-type Update = { version: string; url: string };
-
 export function App() {
   const { t } = useTranslation();
   const [servers, setServers] = useState<Config.Server[] | null>(null);
   const [game, setGame] = useState<Core.GameInfo | null>(null);
   const [version, setVersion] = useState("");
-  const [update, setUpdate] = useState<Update | null>(null);
-  const [updating, setUpdating] = useState(false);
   const [adding, setAdding] = useState(false);
   const [settings, setSettings] = useState(false);
   const [autoConnect, setAutoConnect] = useState(true);
@@ -39,20 +35,7 @@ export function App() {
     Launcher.Game().then(setGame);
     Launcher.AutoConnect().then(setAutoConnect);
     AppAPI.Version().then(setVersion);
-    AppAPI.CheckUpdate()
-      .then((u) => u.available && setUpdate({ version: u.version, url: u.url }))
-      .catch(() => {});
   }, [reload]);
-
-  const applyUpdate = async () => {
-    setUpdating(true);
-    try {
-      await AppAPI.ApplyUpdate();
-    } catch (err) {
-      toast.error(errorMessage(err));
-      setUpdating(false);
-    }
-  };
 
   const toggleAutoConnect = async (on: boolean) => {
     setAutoConnect(on);
@@ -102,22 +85,6 @@ export function App() {
             </div>
           </div>
         </header>
-
-        {update && (
-          <Alert>
-            <DownloadIcon />
-            <AlertTitle>{t("Launcher {{v}} is available", { v: update.version })}</AlertTitle>
-            <AlertDescription className="flex flex-wrap items-center gap-2">
-              <Button size="sm" onClick={applyUpdate} disabled={updating}>
-                {updating && <Loader2Icon className="animate-spin" />}
-                {t("Update and restart")}
-              </Button>
-              <Button size="sm" variant="link" onClick={() => AppAPI.OpenURL(update.url)}>
-                {t("What's new")}
-              </Button>
-            </AlertDescription>
-          </Alert>
-        )}
 
         {game && !game.found && (
           <Alert>
