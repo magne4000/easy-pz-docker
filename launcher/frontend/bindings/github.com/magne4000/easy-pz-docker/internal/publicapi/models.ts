@@ -6,7 +6,8 @@
 import { Create as $Create } from "@wailsio/runtime";
 
 /**
- * PublicConnect is omitted when PANEL_PUBLIC_HOST is unset.
+ * PublicConnect is omitted when neither PANEL_PUBLIC_GAME_ADDRESS nor
+ * PANEL_PUBLIC_URL is set.
  */
 export class PublicConnect {
     "host": string;

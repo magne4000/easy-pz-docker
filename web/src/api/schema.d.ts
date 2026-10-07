@@ -1477,6 +1477,8 @@ export interface components {
             nonSteam: boolean;
             /** Format: int64 */
             pgid: number;
+            /** @description PANEL_PUBLIC_URL without its trailing slash */
+            publicUrl?: string;
             /** Format: int64 */
             puid: number;
             scenario?: string;

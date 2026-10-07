@@ -16,10 +16,11 @@ func TestPublicConnect(t *testing.T) {
 	cfg.DefaultPort = 16261
 	d := Deps{Cfg: cfg}
 
-	require.Nil(t, publicConnect(d), "no PANEL_PUBLIC_HOST: omitted")
+	require.Nil(t, publicConnect(d), "neither PANEL_PUBLIC_URL nor PANEL_PUBLIC_GAME_ADDRESS: omitted")
 
-	d.Cfg.PublicHost = "pz.example.com"
-	require.Equal(t, &publicapi.PublicConnect{Host: "pz.example.com", Port: 16261}, publicConnect(d), "no ini: env default")
+	d.Cfg.PublicURL = "https://pz.example.com:8443"
+	require.Equal(t, &publicapi.PublicConnect{Host: "pz.example.com", Port: 16261}, publicConnect(d),
+		"no ini: env default; the URL's port is the panel's, not the game's")
 
 	require.NoError(t, os.MkdirAll(filepath.Dir(iniPath(d)), 0o755))
 	require.NoError(t, os.WriteFile(iniPath(d), []byte("DefaultPort=17000\n"), 0o644))
@@ -27,6 +28,18 @@ func TestPublicConnect(t *testing.T) {
 
 	require.NoError(t, os.WriteFile(iniPath(d), []byte("DefaultPort=nope\n"), 0o644))
 	require.Equal(t, 16261, publicConnect(d).Port, "invalid ini value: env default")
+
+	require.NoError(t, os.WriteFile(iniPath(d), []byte("DefaultPort=17000\n"), 0o644))
+	d.Cfg.PublicGameAddress = "play.example.com"
+	require.Equal(t, &publicapi.PublicConnect{Host: "play.example.com", Port: 17000}, publicConnect(d),
+		"game address wins over the URL's host; without a port, the ini's")
+
+	d.Cfg.PublicGameAddress = "203.0.113.7:26261"
+	require.Equal(t, &publicapi.PublicConnect{Host: "203.0.113.7", Port: 26261}, publicConnect(d),
+		"an explicit port wins over the ini (port forwarding)")
+
+	d.Cfg.PublicURL = ""
+	require.Equal(t, "203.0.113.7", publicConnect(d).Host, "works without PANEL_PUBLIC_URL")
 }
 
 func TestPublicLauncher(t *testing.T) {

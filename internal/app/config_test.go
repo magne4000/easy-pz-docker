@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -50,6 +51,47 @@ func TestDriverScenarioPair(t *testing.T) {
 	c.Drivers = DriversFake
 	c.Scenario = "crash-loop"
 	require.NoError(t, c.Validate())
+}
+
+func TestPublicURL(t *testing.T) {
+	base := Config{AdminHash: testHash, Drivers: DriversReal, CookieSecure: CookieSecureAuto, LogLevel: "info",
+		Port: 8080, ConsoleRing: 10, ServerName: "s", Timezone: "UTC", Scenario: "idle"}
+	for _, ok := range []string{"https://pz.example.com", "http://203.0.113.7:8080/", "https://[2001:db8::1]:8443"} {
+		c := base
+		c.PublicURL = ok
+		require.NoError(t, c.Validate(), ok)
+	}
+	for _, bad := range []string{"pz.example.com", "pz.example.com:8080", "//pz.example.com", "ftp://pz.example.com",
+		"https://", "https://pz.example.com/panel", "https://user:pw@pz.example.com", "https://pz.example.com?x=1",
+		"https://pz.example.com#x", "https://pz.example.com:99999", "https://2001:db8::1"} {
+		c := base
+		c.PublicURL = bad
+		require.ErrorContains(t, c.Validate(), "PANEL_PUBLIC_URL", bad)
+	}
+
+	require.Equal(t, "https://[2001:db8::1]:8443", Config{PublicURL: "https://[2001:db8::1]:8443/"}.PublicOrigin())
+}
+
+func TestPublicGameAddress(t *testing.T) {
+	base := Config{AdminHash: testHash, Drivers: DriversReal, CookieSecure: CookieSecureAuto, LogLevel: "info",
+		Port: 8080, ConsoleRing: 10, ServerName: "s", Timezone: "UTC", Scenario: "idle"}
+	for _, ok := range []string{"play.example.com", "203.0.113.7:26261", "[2001:db8::1]", "[2001:db8::1]:16261"} {
+		c := base
+		c.PublicGameAddress = ok
+		require.NoError(t, c.Validate(), ok)
+	}
+	for _, bad := range []string{"udp://play.example.com", "https://play.example.com", "play.example.com/x",
+		"2001:db8::1", "play.example.com:0", "play.example.com:99999", "user@play.example.com", ":16261"} {
+		c := base
+		c.PublicGameAddress = bad
+		require.ErrorContains(t, c.Validate(), "PANEL_PUBLIC_GAME_ADDRESS", bad)
+	}
+
+	addr := func(c Config) string { h, p := c.GameAddress(); return fmt.Sprintf("%s|%d", h, p) }
+	require.Equal(t, "|0", addr(Config{}))
+	require.Equal(t, "pz.example.com|0", addr(Config{PublicURL: "https://pz.example.com:8443"}),
+		"falls back to the URL's host, never its (web) port")
+	require.Equal(t, "2001:db8::1|16261", addr(Config{PublicURL: "https://pz.example.com", PublicGameAddress: "[2001:db8::1]:16261"}))
 }
 
 func TestRedactedHasNoSecrets(t *testing.T) {

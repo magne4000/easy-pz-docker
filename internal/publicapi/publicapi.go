@@ -21,7 +21,8 @@ type PublicData struct {
 	GeneratedAt   time.Time       `json:"generatedAt"`
 }
 
-// PublicConnect is omitted when PANEL_PUBLIC_HOST is unset.
+// PublicConnect is omitted when neither PANEL_PUBLIC_GAME_ADDRESS nor
+// PANEL_PUBLIC_URL is set.
 type PublicConnect struct {
 	Host string `json:"host"`
 	Port int    `json:"port"`

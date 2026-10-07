@@ -80,7 +80,8 @@ Panel variables:
 | `PANEL_COOKIE_SECURE` | `auto` | `auto` trusts `X-Forwarded-Proto` from `PANEL_TRUSTED_PROXIES` (and loopback) only |
 | `PANEL_TRUSTED_PROXIES` | | comma-separated reverse proxy addresses |
 | `PANEL_MODS_TOKEN` | random, persisted | the unlisted `/mods/<token>/` path |
-| `PANEL_PUBLIC_HOST` | | address players join, for the launcher |
+| `PANEL_PUBLIC_URL` | | the panel's public address, `http(s)://host[:port]`: the mod page link shown in Settings. Its host is also where the launcher joins, unless `PANEL_PUBLIC_GAME_ADDRESS` is set |
+| `PANEL_PUBLIC_GAME_ADDRESS` | host of `PANEL_PUBLIC_URL` | where players join the game, `host[:port]` (IPv6 in brackets). Set it when that host only carries HTTP (CDN or proxy) or the game runs elsewhere. The port defaults to the server's `DefaultPort`; set it when players reach the game through another forwarded port |
 | `PANEL_BACKUP_DIR` | `/backups` | mount a different volume than the one it protects |
 | `PANEL_BACKUP_INTERVAL` / `_KEEP` / `_KEEP_DAILY` / `_KEEP_WEEKLY` / `_MAX_TOTAL_GB` | `2h` / `24` / `7` / `4` / `0` | defaults; editable in the UI |
 | `PANEL_UPDATE_CHECK_INTERVAL` / `PANEL_UPDATE_MAX_DELAY` | `1h` / `2h` | defaults; editable in the UI |
@@ -107,10 +108,11 @@ if you publish the mod page to the internet, restrict everything except
 `-nosteam`. A Steam copy of the game works too: it is found in the Steam
 libraries and started the same way. Turn off *Join automatically* on the main
 screen to only sync the mods and start the game, then join from the game's
-menu. Set `PANEL_PUBLIC_HOST` so it knows where to connect. Builds are on the
-releases page and update themselves; the mod page links the release of the
-image's version (release images only, not local builds). Pull requests that
-touch the launcher get test builds, linked from a bot comment.
+menu. Set `PANEL_PUBLIC_URL` (or `PANEL_PUBLIC_GAME_ADDRESS`) so it knows where
+to connect. Builds are on the releases page and update themselves; the mod
+page links the release of the image's version (release images only, not local
+builds). Pull requests that touch the launcher get test builds, linked from a
+bot comment.
 
 ## Developing
 

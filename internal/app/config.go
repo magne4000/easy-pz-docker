@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,13 +46,16 @@ type Config struct {
 	TrustedProxies []string      `env:"PANEL_TRUSTED_PROXIES"`
 	ConsoleRing    int           `env:"PANEL_CONSOLE_RING" envDefault:"2000"`
 	ModsToken      string        `env:"PANEL_MODS_TOKEN"`
-	PublicHost     string        `env:"PANEL_PUBLIC_HOST"`
-	SteamCMD       string        `env:"PANEL_STEAMCMD" envDefault:"/opt/steamcmd/steamcmd.sh"`
-	SteamHome      string        `env:"PANEL_STEAM_HOME" envDefault:"/var/lib/pzman/steam"`
-	CacheDir       string        `env:"PANEL_CACHE_DIR" envDefault:"/var/lib/pzman/cache"`
-	StopTimeout    time.Duration `env:"PANEL_STOP_TIMEOUT" envDefault:"90s"`
-	DiskWarnPct    float64       `env:"PANEL_DISK_WARN_PERCENT" envDefault:"85"`
-	DiskCritPct    float64       `env:"PANEL_DISK_CRIT_PERCENT" envDefault:"95"`
+	PublicURL      string        `env:"PANEL_PUBLIC_URL"`
+	// PublicGameAddress: set when players reach the game elsewhere than
+	// PublicURL's host (CDN or HTTP-only proxy, another machine, other port).
+	PublicGameAddress string        `env:"PANEL_PUBLIC_GAME_ADDRESS"`
+	SteamCMD          string        `env:"PANEL_STEAMCMD" envDefault:"/opt/steamcmd/steamcmd.sh"`
+	SteamHome         string        `env:"PANEL_STEAM_HOME" envDefault:"/var/lib/pzman/steam"`
+	CacheDir          string        `env:"PANEL_CACHE_DIR" envDefault:"/var/lib/pzman/cache"`
+	StopTimeout       time.Duration `env:"PANEL_STOP_TIMEOUT" envDefault:"90s"`
+	DiskWarnPct       float64       `env:"PANEL_DISK_WARN_PERCENT" envDefault:"85"`
+	DiskCritPct       float64       `env:"PANEL_DISK_CRIT_PERCENT" envDefault:"95"`
 
 	// Defaults for settings the UI can override (stored in the DB).
 	BackupInterval      time.Duration `env:"PANEL_BACKUP_INTERVAL" envDefault:"2h"`
@@ -139,6 +144,17 @@ func (c Config) validate(checkHash bool) error {
 	if c.ServerName == "" || strings.ContainsAny(c.ServerName, `/\`) {
 		errs = append(errs, fmt.Errorf("SERVER_NAME %q is not a valid server name", c.ServerName))
 	}
+	if c.PublicURL != "" {
+		if err := validatePublicURL(c.PublicURL); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if c.PublicGameAddress != "" {
+		if _, _, ok := parseHostPort(c.PublicGameAddress); !ok {
+			errs = append(errs, fmt.Errorf("PANEL_PUBLIC_GAME_ADDRESS must be host[:port] (IPv6 in brackets), got %q",
+				c.PublicGameAddress))
+		}
+	}
 	return errors.Join(errs...)
 }
 
@@ -158,6 +174,53 @@ func validateAdminHash(h string) error {
 		return fmt.Errorf("PANEL_ADMIN_PASSWORD_HASH cost %d is too low, use 12", cost)
 	}
 	return nil
+}
+
+// validatePublicURL accepts only an origin: the panel is served from the root.
+func validatePublicURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil ||
+		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("PANEL_PUBLIC_URL must be http(s)://host[:port], got %q", s)
+	}
+	if _, _, ok := parseHostPort(u.Host); !ok {
+		return fmt.Errorf("PANEL_PUBLIC_URL must be http(s)://host[:port], got %q", s)
+	}
+	return nil
+}
+
+// parseHostPort reads "host", "host:port" or "[ipv6]:port"; port 0 when absent.
+func parseHostPort(s string) (host string, port int, ok bool) {
+	if !strings.HasPrefix(s, "[") && strings.Count(s, ":") > 1 {
+		return "", 0, false // unbracketed IPv6 would parse as host "2001:db8:", port 1
+	}
+	u, err := url.Parse("//" + s)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
+		return "", 0, false
+	}
+	if p := u.Port(); p != "" {
+		if port, err = strconv.Atoi(p); err != nil || port < 1 || port > 65535 {
+			return "", 0, false
+		}
+	}
+	return u.Hostname(), port, true
+}
+
+// PublicOrigin is PANEL_PUBLIC_URL without its trailing slash, "" when unset.
+func (c Config) PublicOrigin() string { return strings.TrimSuffix(c.PublicURL, "/") }
+
+// GameAddress is where the launcher joins: PANEL_PUBLIC_GAME_ADDRESS, else
+// PANEL_PUBLIC_URL's hostname (that URL's port is the panel's). Port 0 means
+// the server's DefaultPort.
+func (c Config) GameAddress() (host string, port int) {
+	if c.PublicGameAddress != "" {
+		host, port, _ = parseHostPort(c.PublicGameAddress)
+		return host, port
+	}
+	if u, err := url.Parse(c.PublicURL); err == nil {
+		return u.Hostname(), 0
+	}
+	return "", 0
 }
 
 func parseLevel(s string) (slog.Level, error) {
@@ -182,10 +245,11 @@ func (c Config) Location() *time.Location {
 // Redacted is a one-line, log-safe rendering: never the hash, secret or token.
 func (c Config) Redacted() string {
 	return fmt.Sprintf("env=%s port=%d drivers=%s scenario=%s install=%s data=%s backups=%s db=%s admin=%s "+
-		"server=%s branch=%q steam=%t puid=%d pgid=%d xmx=%dg tz=%s jwt_secret=%s rcon_password=%s mods_token=%s",
+		"server=%s branch=%q steam=%t puid=%d pgid=%d xmx=%dg tz=%s public_url=%q public_game_address=%q "+
+		"jwt_secret=%s rcon_password=%s mods_token=%s",
 		c.Env, c.Port, c.Drivers, c.Scenario, c.InstallDir, c.DataDir, c.BackupDir, c.DBPath, c.AdminUser,
-		c.ServerName, c.ServerBranch, c.UseSteam, c.PUID, c.PGID, c.MemoryXmxGB, c.Timezone,
-		setOrUnset(c.JWTSecret), setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
+		c.ServerName, c.ServerBranch, c.UseSteam, c.PUID, c.PGID, c.MemoryXmxGB, c.Timezone, c.PublicURL,
+		c.PublicGameAddress, setOrUnset(c.JWTSecret), setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
 }
 
 func setOrUnset(s string) string {

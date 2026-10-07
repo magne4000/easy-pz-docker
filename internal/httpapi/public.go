@@ -58,20 +58,24 @@ func newPublicSet(ms []mods.ModInfo, installed map[string]steam.WorkshopItemStat
 	return ps
 }
 
-// publicConnect prefers the ini's DefaultPort, which the admin may have edited.
+// publicConnect: an explicit game port wins; otherwise the ini's DefaultPort,
+// which the admin may have edited.
 func publicConnect(d Deps) *publicapi.PublicConnect {
-	if d.Cfg.PublicHost == "" {
+	host, port := d.Cfg.GameAddress()
+	if host == "" {
 		return nil
 	}
-	port := d.Cfg.DefaultPort
-	if ini, err := pz.ReadIniFile(iniPath(d)); err == nil {
-		if v, ok := ini.Get("DefaultPort"); ok {
-			if p, err := strconv.Atoi(v); err == nil && p > 0 && p < 65536 {
-				port = p
+	if port == 0 {
+		port = d.Cfg.DefaultPort
+		if ini, err := pz.ReadIniFile(iniPath(d)); err == nil {
+			if v, ok := ini.Get("DefaultPort"); ok {
+				if p, err := strconv.Atoi(v); err == nil && p > 0 && p < 65536 {
+					port = p
+				}
 			}
 		}
 	}
-	return &publicapi.PublicConnect{Host: d.Cfg.PublicHost, Port: port}
+	return &publicapi.PublicConnect{Host: host, Port: port}
 }
 
 // releaseVersion matches the git tag CI stamps on release images. Local

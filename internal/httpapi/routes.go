@@ -278,6 +278,7 @@ type SystemOutput struct {
 		PUID         int          `json:"puid"`
 		PGID         int          `json:"pgid"`
 		ModsPagePath string       `json:"modsPagePath" doc:"unlisted public mod page path (empty when disabled)"`
+		PublicURL    string       `json:"publicUrl,omitempty" doc:"PANEL_PUBLIC_URL without its trailing slash"`
 		Branch       string       `json:"branch"`
 		Subscribers  int          `json:"subscribers"`
 	}
@@ -311,7 +312,7 @@ func registerSystem(api huma.API, d Deps) {
 			b.Timezone, b.Time, b.PUID, b.PGID, b.Branch = d.Cfg.Timezone, time.Now().UTC(), d.Cfg.PUID, d.Cfg.PGID, d.Cfg.ServerBranch
 			b.Disks = d.Disk.Snapshot()
 			b.DiskLevel = string(sys.Worst(b.Disks))
-			b.ModsPagePath = modsPagePath(d)
+			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicOrigin()
 			b.Subscribers = d.Bus.Stats().Subscribers
 			return out, nil
 		})

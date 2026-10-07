@@ -66,7 +66,9 @@ export default function Settings() {
   });
   if (!form) return <Card className="h-64 animate-pulse" />;
   const set = <K extends keyof S>(k: K, v: S[K]) => setForm((f) => (f ? { ...f, [k]: v } : f));
-  const pageUrl = sys.data?.modsPagePath ? `${window.location.origin}${sys.data.modsPagePath}` : "";
+  // PANEL_PUBLIC_URL wins: the admin may be on a LAN address players can't reach.
+  const origin = sys.data?.publicUrl || window.location.origin;
+  const pageUrl = sys.data?.modsPagePath ? `${origin}${sys.data.modsPagePath}` : "";
 
   return (
     <div>
