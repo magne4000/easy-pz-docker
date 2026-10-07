@@ -17,7 +17,7 @@ backups, scheduling and the web UI.
 - **Player mod page**: an unlisted, `noindex` link where players download the exact mod set as a zip (with resume support and a checksum), plus the config snippet for people hosting the same set.
 - **Server config**: structured editor for the server `.ini`, with *save & reload*.
 - **Sandbox options**: structured editor for `<server>_SandboxVars.lua` with ranges, defaults and choices. Enabled mods' options appear like in the game's sandbox editor: on the mod's page, with its translated names, tooltips and choices (from the mod's `sandbox-options.txt` and English `Sandbox.json`), including options the server has not written to the file yet. Changes apply at the next start.
-- **Launcher** (non-Steam players): syncs mods and joins the server. See [Launcher](#launcher).
+- **Launcher** (non-Steam servers): syncs mods and joins the server, with a Steam or non-Steam copy of the game. See [Launcher](#launcher).
 
 ## Running it
 
@@ -101,9 +101,11 @@ if you publish the mod page to the internet, restrict everything except
 
 ## Launcher
 
-`launcher/` is a desktop app for players of a **non-Steam** server: paste the
-server's mod page link, and it keeps the mods in `~/Zomboid/mods` in sync and
-starts the game straight into the server. Set `PANEL_PUBLIC_HOST` so it knows
+`launcher/` is a desktop app for players of a **non-Steam** server
+(`USE_STEAM=false`): paste the server's mod page link, and it keeps the mods in
+`~/Zomboid/mods` in sync and starts the game straight into the server with
+`-nosteam`. A Steam copy of the game works too: it is found in the Steam
+libraries and started the same way. Set `PANEL_PUBLIC_HOST` so it knows
 where to connect. Builds are on the releases page and update themselves. Pull
 requests that touch the launcher get test builds, linked from a bot comment.
 
