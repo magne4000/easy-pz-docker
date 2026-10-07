@@ -93,6 +93,16 @@ func (s *Service) SetGameDir(dir string) (GameInfo, error) {
 	return s.Game(), nil
 }
 
+// AutoConnect is on unless the player turned it off.
+func (s *Service) AutoConnect() bool {
+	on := s.cfg.Get().AutoConnect
+	return on == nil || *on
+}
+
+func (s *Service) SetAutoConnect(on bool) error {
+	return s.cfg.Update(func(c *config.Config) error { c.AutoConnect = &on; return nil })
+}
+
 func (s *Service) Servers() []config.Server { return s.cfg.Get().Servers }
 
 func (s *Service) AddServerURL(ctx context.Context, raw string) (config.Server, error) {

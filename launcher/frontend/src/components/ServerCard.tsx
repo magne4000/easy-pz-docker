@@ -46,10 +46,12 @@ export function autoLoginAccounts(saved?: Saved.Server | null): Saved.Account[] 
 export function ServerCard({
   server,
   gameVersion,
+  autoConnect,
   onChanged,
 }: {
   server: Config.Server;
   gameVersion: string;
+  autoConnect: boolean;
   onChanged: () => void;
 }) {
   const { t } = useTranslation();
@@ -64,7 +66,9 @@ export function ServerCard({
   const selected = choice ?? (preferred ? String(preferred.id) : OTHER);
 
   const play = () => {
-    if (selected !== OTHER) {
+    if (!autoConnect) {
+      launch.run("start", server);
+    } else if (selected !== OTHER) {
       launch.run("play", server, { accountId: Number(selected) });
     } else {
       setAskCreds(true);
@@ -90,7 +94,8 @@ export function ServerCard({
   };
 
   const mismatch = !!status?.gameVersion && !!gameVersion && status.gameVersion !== gameVersion;
-  const noAddress = !server.host || !server.port;
+  // Only joining needs the address.
+  const noAddress = autoConnect && (!server.host || !server.port);
 
   return (
     <Card className="gap-4">
@@ -100,7 +105,9 @@ export function ServerCard({
           <StatusBadge status={status} error={error} />
         </CardTitle>
         <CardDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="font-mono">{noAddress ? t("No address") : `${server.host}:${server.port}`}</span>
+          <span className="font-mono">
+            {!server.host || !server.port ? t("No address") : `${server.host}:${server.port}`}
+          </span>
           {status?.players != null && (
             <span className="inline-flex items-center gap-1">
               <UsersIcon className="size-3.5" />
@@ -152,21 +159,23 @@ export function ServerCard({
         )}
         <ModsLine status={status} onSync={() => launch.run("sync", server)} disabled={launch.busy} />
         <div className="flex flex-wrap items-center gap-2">
-          <Select value={selected} onValueChange={setChoice}>
-            <SelectTrigger className="w-56" aria-label={t("Account")}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {accounts.map((a) => (
-                <SelectItem key={a.id} value={String(a.id)}>
-                  {a.username}
+          {autoConnect && (
+            <Select value={selected} onValueChange={setChoice}>
+              <SelectTrigger className="w-56" aria-label={t("Account")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {accounts.map((a) => (
+                  <SelectItem key={a.id} value={String(a.id)}>
+                    {a.username}
+                  </SelectItem>
+                ))}
+                <SelectItem value={OTHER}>
+                  {accounts.length ? t("Other account…") : t("Enter a login…")}
                 </SelectItem>
-              ))}
-              <SelectItem value={OTHER}>
-                {accounts.length ? t("Other account…") : t("Enter a login…")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+              </SelectContent>
+            </Select>
+          )}
           <Tooltip>
             <TooltipTrigger asChild>
               <span>
@@ -178,9 +187,6 @@ export function ServerCard({
             </TooltipTrigger>
             {noAddress && <TooltipContent>{t("Set the server's address first (Edit)")}</TooltipContent>}
           </Tooltip>
-          <Button variant="outline" onClick={() => launch.run("start", server)} disabled={launch.busy}>
-            {t("Start game")}
-          </Button>
         </div>
       </CardContent>
       <CredentialsDialog

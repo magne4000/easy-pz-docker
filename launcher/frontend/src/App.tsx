@@ -8,6 +8,9 @@ import { ServerCard } from "@/components/ServerCard";
 import { GameFolder, SettingsDialog } from "@/components/SettingsDialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { App as AppAPI, type Config, type Core, errorMessage, Launcher } from "@/lib/api";
 
 type Update = { version: string; url: string };
@@ -21,6 +24,7 @@ export function App() {
   const [updating, setUpdating] = useState(false);
   const [adding, setAdding] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [autoConnect, setAutoConnect] = useState(true);
 
   const reload = useCallback(async () => {
     try {
@@ -33,6 +37,7 @@ export function App() {
   useEffect(() => {
     reload();
     Launcher.Game().then(setGame);
+    Launcher.AutoConnect().then(setAutoConnect);
     AppAPI.Version().then(setVersion);
     AppAPI.CheckUpdate()
       .then((u) => u.available && setUpdate({ version: u.version, url: u.url }))
@@ -49,6 +54,16 @@ export function App() {
     }
   };
 
+  const toggleAutoConnect = async (on: boolean) => {
+    setAutoConnect(on);
+    try {
+      await Launcher.SetAutoConnect(on);
+    } catch (err) {
+      setAutoConnect(!on);
+      toast.error(errorMessage(err));
+    }
+  };
+
   return (
     <LaunchProvider onDone={reload}>
       <div className="mx-auto flex min-h-screen max-w-3xl flex-col gap-6 p-6">
@@ -57,14 +72,29 @@ export function App() {
             <h1 className="font-semibold text-xl">{t("EasyPZ Launcher")}</h1>
             <p className="text-muted-foreground text-sm">{t("Sync mods and join Project Zomboid servers")}</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => setAdding(true)}>
-              <PlusIcon />
-              {t("Add server")}
-            </Button>
-            <Button variant="ghost" size="icon" onClick={() => setSettings(true)} aria-label={t("Settings")}>
-              <SettingsIcon />
-            </Button>
+          <div className="flex items-center gap-4">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-2">
+                  <Switch id="auto-connect" checked={autoConnect} onCheckedChange={toggleAutoConnect} />
+                  <Label htmlFor="auto-connect">{t("Join automatically")}</Label>
+                </div>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-64">
+                {autoConnect
+                  ? t("Play syncs the mods, starts the game and joins the server.")
+                  : t("Play syncs the mods and starts the game: join the server from the game's menu.")}
+              </TooltipContent>
+            </Tooltip>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" onClick={() => setAdding(true)}>
+                <PlusIcon />
+                {t("Add server")}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => setSettings(true)} aria-label={t("Settings")}>
+                <SettingsIcon />
+              </Button>
+            </div>
           </div>
         </header>
 
@@ -109,7 +139,13 @@ export function App() {
         ) : (
           <div className="space-y-4">
             {servers.map((s) => (
-              <ServerCard key={s.id} server={s} gameVersion={game?.version ?? ""} onChanged={reload} />
+              <ServerCard
+                key={s.id}
+                server={s}
+                gameVersion={game?.version ?? ""}
+                autoConnect={autoConnect}
+                onChanged={reload}
+              />
             ))}
           </div>
         )}

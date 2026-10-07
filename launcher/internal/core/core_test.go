@@ -257,6 +257,20 @@ func TestStartGameClearsLeftoverFile(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
+func TestAutoConnectDefaultsOnAndPersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	// Saved before the setting existed.
+	require.NoError(t, os.WriteFile(path, []byte(`{"servers":[]}`), 0o644))
+	open := func() *Service {
+		store, err := config.Open(path)
+		require.NoError(t, err)
+		return New("test", store, zomboid.Dir(t.TempDir()), &events{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}
+	require.True(t, open().AutoConnect())
+	require.NoError(t, open().SetAutoConnect(false))
+	require.False(t, open().AutoConnect(), "off survives a restart")
+}
+
 func TestForeignModsNeedTakeOver(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()

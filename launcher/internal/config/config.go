@@ -28,6 +28,9 @@ type Config struct {
 	GameDir string            `json:"gameDir,omitempty"`
 	Servers []Server          `json:"servers"`
 	Mods    modsync.Installed `json:"mods"`
+	// AutoConnect: Play joins the server; off, it only syncs and starts the
+	// game. Unset means on.
+	AutoConnect *bool `json:"autoConnect,omitempty"`
 }
 
 type Store struct {

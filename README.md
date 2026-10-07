@@ -105,11 +105,12 @@ if you publish the mod page to the internet, restrict everything except
 (`USE_STEAM=false`): paste the server's mod page link, and it keeps the mods in
 `~/Zomboid/mods` in sync and starts the game straight into the server with
 `-nosteam`. A Steam copy of the game works too: it is found in the Steam
-libraries and started the same way. Set `PANEL_PUBLIC_HOST` so it knows
-where to connect. Builds are on the releases page and update themselves; the
-mod page links the release of the image's version (release images only, not
-local builds). Pull requests that touch the launcher get test builds, linked
-from a bot comment.
+libraries and started the same way. Turn off *Join automatically* on the main
+screen to only sync the mods and start the game, then join from the game's
+menu. Set `PANEL_PUBLIC_HOST` so it knows where to connect. Builds are on the
+releases page and update themselves; the mod page links the release of the
+image's version (release images only, not local builds). Pull requests that
+touch the launcher get test builds, linked from a bot comment.
 
 ## Developing
 
