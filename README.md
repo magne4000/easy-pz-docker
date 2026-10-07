@@ -104,7 +104,8 @@ if you publish the mod page to the internet, restrict everything except
 `launcher/` is a desktop app for players of a **non-Steam** server: paste the
 server's mod page link, and it keeps the mods in `~/Zomboid/mods` in sync and
 starts the game straight into the server. Set `PANEL_PUBLIC_HOST` so it knows
-where to connect. Builds are on the releases page and update themselves.
+where to connect. Builds are on the releases page and update themselves. Pull
+requests that touch the launcher get test builds, linked from a bot comment.
 
 ## Developing
 
