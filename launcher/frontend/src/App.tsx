@@ -91,7 +91,12 @@ export function App() {
                 <PlusIcon />
                 {t("Add server")}
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => setSettings(true)} aria-label={t("Settings")}>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setSettings(true)}
+                aria-label={t("Settings")}
+              >
                 <SettingsIcon />
               </Button>
             </div>
