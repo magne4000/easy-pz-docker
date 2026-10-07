@@ -43,7 +43,7 @@ func releaseServer(t *testing.T, tag string, payload []byte, sum string) *httpte
 func TestCheck(t *testing.T) {
 	srv := releaseServer(t, "v1.2.0", nil, "")
 	ctx := context.Background()
-	for cur, newer := range map[string]bool{"v1.1.9": true, "v1.2.0": false, "v1.3.0": false, "dev": false} {
+	for cur, newer := range map[string]bool{"v1.1.9": true, "v1.2.0": false, "v1.3.0": false} {
 		u := New(cur)
 		u.API = srv.URL
 		rel, err := u.Check(ctx)
@@ -53,6 +53,10 @@ func TestCheck(t *testing.T) {
 			require.Equal(t, "v1.2.0", rel.Version)
 		}
 	}
+	u := New("dev")
+	u.API = srv.URL
+	_, err := u.Check(ctx)
+	require.ErrorIs(t, err, ErrDevBuild)
 }
 
 func TestDownloadVerifiesChecksum(t *testing.T) {

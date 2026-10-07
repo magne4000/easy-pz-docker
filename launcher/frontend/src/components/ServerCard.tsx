@@ -214,11 +214,17 @@ export function ServerCard({
 function StatusBadge({ status, error }: { status: Core.Status | null; error: string | null }) {
   const { t } = useTranslation();
   if (error || (status && !status.reachable)) {
+    const busy = !error && status?.busy;
     return (
       <Tooltip>
         <TooltipTrigger asChild>
-          <Badge variant="outline" className="bg-destructive/15 text-destructive border-destructive/30">
-            {t("Unreachable")}
+          <Badge
+            variant="outline"
+            className={
+              busy ? statusStyles.restarting : "bg-destructive/15 text-destructive border-destructive/30"
+            }
+          >
+            {busy ? t("Busy") : t("Unreachable")}
           </Badge>
         </TooltipTrigger>
         <TooltipContent>{error ?? status?.error}</TooltipContent>

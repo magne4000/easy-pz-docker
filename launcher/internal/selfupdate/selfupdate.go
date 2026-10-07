@@ -49,9 +49,14 @@ func New(current string) *Updater {
 	return &Updater{Current: current, HTTP: &http.Client{Timeout: 5 * time.Minute}, API: "https://api.github.com"}
 }
 
+// ErrDevBuild: only release builds know which release they are.
+var ErrDevBuild = errors.New("this is a development build: updates come with release builds")
+
+// Check looks for a newer release; nil means up to date. The launcher calls
+// it only when the player asks.
 func (u *Updater) Check(ctx context.Context) (*Release, error) {
 	if !semver.IsValid(u.Current) {
-		return nil, nil // dev build
+		return nil, ErrDevBuild
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.API+"/repos/"+publicapi.LauncherRepo+"/releases/latest", nil)
 	if err != nil {

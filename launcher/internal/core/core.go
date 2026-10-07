@@ -212,8 +212,10 @@ func (s *Service) server(id string) (config.Server, error) {
 }
 
 type Status struct {
-	ID            string                   `json:"id"`
-	Reachable     bool                     `json:"reachable"`
+	ID        string `json:"id"`
+	Reachable bool   `json:"reachable"`
+	// Busy: the server turned this network away (429); it is up.
+	Busy          bool                     `json:"busy"`
 	Error         string                   `json:"error,omitempty"`
 	HasModPage    bool                     `json:"hasModPage"`
 	Status        string                   `json:"status,omitempty"`
@@ -235,7 +237,7 @@ func (s *Service) Status(ctx context.Context, id string) (Status, error) {
 	if srv.PageURL != "" {
 		data, err := s.client.Fetch(ctx, srv.PageURL)
 		if err != nil {
-			st.Reachable, st.Error = false, err.Error()
+			st.Reachable, st.Busy, st.Error = false, errors.Is(err, pzclient.ErrBusy), err.Error()
 		} else {
 			st.Status, st.StatusMessage, st.Players = data.Status, data.StatusMessage, data.Players
 			st.Connect, st.GameVersion, st.ModCount = data.Connect, data.GameVersion, len(data.Items)
@@ -469,7 +471,11 @@ func (s *Service) waitAvailable(ctx context.Context, srv config.Server, data *pu
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			phase(PhaseWaiting, "Server unreachable, retrying…")
+			msg := "Server unreachable, retrying…"
+			if errors.Is(err, pzclient.ErrBusy) {
+				msg = "Server busy, retrying…"
+			}
+			phase(PhaseWaiting, msg)
 			continue
 		}
 		data = next

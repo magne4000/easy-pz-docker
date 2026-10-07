@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -91,6 +92,8 @@ func foldersExist(modsDir string, folders []string) bool {
 
 type Downloader interface {
 	DownloadFile(ctx context.Context, dir, page, packURL, want string, progress func(int64)) (string, error)
+	Files(ctx context.Context, page, filesURL string) (*publicapi.PackFiles, error)
+	DownloadFiles(ctx context.Context, dir, page, filesURL string, sel publicapi.FilesRequest, progress func(int64)) (string, error)
 }
 
 type Progress struct {
@@ -126,17 +129,17 @@ func (s *Syncer) Apply(ctx context.Context, p Plan, in Installed, takeOver bool,
 		return err
 	}
 	for i, it := range p.Download {
-		report := func(n int64) {
+		report := func(n, size int64) {
 			if progress != nil {
-				progress(Progress{Index: i, Total: len(p.Download), Title: it.Title, Bytes: n, Size: it.Download.Size})
+				progress(Progress{Index: i, Total: len(p.Download), Title: it.Title, Bytes: n, Size: size})
 			}
 		}
-		report(0)
-		folders, err := s.installItem(ctx, it, report)
+		report(0, it.Download.Size)
+		got, err := s.installItem(ctx, it, report)
 		if err != nil {
 			return fmt.Errorf("%s: %w", it.Title, err)
 		}
-		in[it.WorkshopID] = Item{SHA256: it.Download.SHA256, Folders: folders}
+		in[it.WorkshopID] = got
 		if err := save(in); err != nil {
 			return err
 		}
@@ -144,24 +147,46 @@ func (s *Syncer) Apply(ctx context.Context, p Plan, in Installed, takeOver bool,
 	return nil
 }
 
-func (s *Syncer) installItem(ctx context.Context, it publicapi.PublicItem, report func(int64)) ([]string, error) {
+// installItem patches folders already on disk when the server lists files,
+// else replaces them with the whole pack.
+func (s *Syncer) installItem(ctx context.Context, it publicapi.PublicItem, report func(n, size int64)) (Item, error) {
+	want := it.Download.SHA256
+	if it.Files != "" && slices.ContainsFunc(itemFolders(it), func(f string) bool { return dirExists(filepath.Join(s.ModsDir, f)) }) {
+		got, err := s.patchItem(ctx, it, report)
+		if !errors.Is(err, errWholePack) {
+			return got, err
+		}
+		want = got.SHA256
+	}
+	folders, err := s.replaceItem(ctx, it, want, func(n int64) { report(n, it.Download.Size) })
+	return Item{SHA256: want, Folders: folders}, err
+}
+
+// retry runs f again while the server answers that it is still preparing.
+func (s *Syncer) retry(ctx context.Context, title string, f func() error) error {
 	attempts := max(s.Attempts, 1)
-	var zipPath string
-	var err error
-	for a := 0; a < attempts; a++ {
-		zipPath, err = s.DL.DownloadFile(ctx, s.ModsDir, s.Page, it.Download.URL, it.Download.SHA256, report)
-		if err == nil || !isNotReady(err) {
-			break
+	for a := 1; ; a++ {
+		err := f()
+		if !isNotReady(err) {
+			return err
+		}
+		if a == attempts {
+			return &NotReadyError{Title: title}
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return ctx.Err()
 		case <-time.After(s.Retry):
 		}
 	}
-	if isNotReady(err) {
-		return nil, &NotReadyError{Title: it.Title}
-	}
+}
+
+func (s *Syncer) replaceItem(ctx context.Context, it publicapi.PublicItem, want string, report func(int64)) ([]string, error) {
+	var zipPath string
+	err := s.retry(ctx, it.Title, func() (err error) {
+		zipPath, err = s.DL.DownloadFile(ctx, s.ModsDir, s.Page, it.Download.URL, want, report)
+		return err
+	})
 	if err != nil {
 		return nil, err
 	}

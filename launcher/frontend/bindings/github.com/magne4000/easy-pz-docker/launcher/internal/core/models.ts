@@ -117,6 +117,11 @@ export class PlayRequest {
 export class Status {
     "id": string;
     "reachable": boolean;
+
+    /**
+     * Busy: the server turned this network away (429); it is up.
+     */
+    "busy": boolean;
     "error"?: string;
     "hasModPage": boolean;
     "status"?: string;
@@ -136,6 +141,9 @@ export class Status {
         if (!("reachable" in $$source)) {
             this["reachable"] = false;
         }
+        if (!("busy" in $$source)) {
+            this["busy"] = false;
+        }
         if (!("hasModPage" in $$source)) {
             this["hasModPage"] = false;
         }
@@ -153,18 +161,18 @@ export class Status {
      * Creates a new Status instance from a string or object.
      */
     static createFrom($$source: any = {}): Status {
-        const $$createField7_0 = $$createType1;
-        const $$createField10_0 = $$createType2;
-        const $$createField11_0 = $$createType4;
+        const $$createField8_0 = $$createType1;
+        const $$createField11_0 = $$createType2;
+        const $$createField12_0 = $$createType4;
         let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
         if ("connect" in $$parsedSource) {
-            $$parsedSource["connect"] = $$createField7_0($$parsedSource["connect"]);
+            $$parsedSource["connect"] = $$createField8_0($$parsedSource["connect"]);
         }
         if ("plan" in $$parsedSource) {
-            $$parsedSource["plan"] = $$createField10_0($$parsedSource["plan"]);
+            $$parsedSource["plan"] = $$createField11_0($$parsedSource["plan"]);
         }
         if ("saved" in $$parsedSource) {
-            $$parsedSource["saved"] = $$createField11_0($$parsedSource["saved"]);
+            $$parsedSource["saved"] = $$createField12_0($$parsedSource["saved"]);
         }
         return new Status($$parsedSource as Partial<Status>);
     }

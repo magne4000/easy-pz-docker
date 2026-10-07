@@ -1179,6 +1179,8 @@ export interface components {
         };
         PublicItem: {
             download: components["schemas"]["PublicPack"];
+            /** @description Per-file listing of the download (GET, PackFiles) and partial downloads of it (POST FilesRequest, answers a zip); omitted by servers that predate it */
+            files?: string;
             mods: components["schemas"]["PublicMod"][];
             /** Format: int64 */
             size: number;

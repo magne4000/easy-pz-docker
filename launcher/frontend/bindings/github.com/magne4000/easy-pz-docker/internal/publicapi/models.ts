@@ -42,6 +42,7 @@ export class PublicItem {
     "timeUpdated"?: string;
     "mods": PublicMod[];
     "download": PublicPack;
+    "files"?: string;
 
     /** Creates a new PublicItem instance. */
     constructor($$source: Partial<PublicItem> = {}) {

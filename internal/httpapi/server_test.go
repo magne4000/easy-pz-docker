@@ -61,7 +61,8 @@ func newServerDB(t *testing.T, cfg app.Config) (*fiber.App, *store.DB) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ms := mods.NewService(mods.Options{InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName,
 		DB: db, CMD: contentCMD{install: cfg.InstallDir}, Bus: bus, Log: log})
-	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms})
+	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms,
+		Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
 	require.NoError(t, err)
 	return s.App(), db
 }

@@ -2,7 +2,6 @@ package httpapi
 
 import (
 	"crypto/subtle"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -192,7 +191,7 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 			key := mods.PackKey(ms, ps.updated)
 			keep = append(keep, key)
 			it := publicapi.PublicItem{WorkshopID: id, Title: titles[id], URL: workshopURL(id), Size: sizes[id], TimeUpdated: ps.updated[id], Mods: []publicapi.PublicMod{},
-				Download: packInfo(d, key, ms, base+"download/"+id+".zip")}
+				Download: packInfo(d, key, ms, base+"download/"+id+".zip"), Files: base + "files/" + id}
 			for _, m := range ms {
 				it.Mods = append(it.Mods, publicapi.PublicMod{ID: m.ID, Name: m.Name, Folder: m.FolderName})
 			}
@@ -207,39 +206,5 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		c.Set(fiber.HeaderCacheControl, "no-store")
 		return c.JSON(out)
 	})
-	g.Get("/download/:file", lim(20), func(c fiber.Ctx) error {
-		name := strings.TrimSuffix(c.Params("file"), ".zip")
-		if name == c.Params("file") {
-			return fiber.ErrNotFound
-		}
-		enabled, installed, err := d.Mods.Enabled(c.Context())
-		if err != nil {
-			return err
-		}
-		ps := newPublicSet(enabled, installed)
-		ms := ps.all
-		filename := fmt.Sprintf("%s-mods.zip", d.Cfg.ServerName)
-		if name != "all" {
-			if !wsidPath.MatchString(name) || len(ps.byItem[name]) == 0 {
-				return fiber.ErrNotFound
-			}
-			ms = ps.byItem[name]
-			filename = fmt.Sprintf("%s-%s.zip", d.Cfg.ServerName, name)
-		}
-		if len(ms) == 0 {
-			return fiber.ErrNotFound
-		}
-		p, ready, err := d.Packer.Get(mods.PackKey(ms, ps.updated), ms)
-		if err != nil {
-			log.Error("public mod pack", "err", err)
-			return fiber.NewError(http.StatusInternalServerError, "building the archive failed; retry in a minute")
-		}
-		if !ready {
-			c.Set(fiber.HeaderRetryAfter, "15")
-			return problem(c, http.StatusServiceUnavailable, "the archive is being prepared, retry shortly")
-		}
-		c.Set(fiber.HeaderContentDisposition, fmt.Sprintf(`attachment; filename="%s"`, filepath.Base(filename)))
-		c.Set("X-Checksum-SHA256", p.SHA256)
-		return c.SendFile(p.Path, fiber.SendFile{ByteRange: true})
-	})
+	registerDownloads(g, d, log, lim(600))
 }
