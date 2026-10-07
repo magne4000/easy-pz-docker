@@ -100,19 +100,24 @@ The panel speaks plain HTTP; put it behind your reverse proxy for TLS and set
 if you publish the mod page to the internet, restrict everything except
 `/mods/<token>/` and `/assets/` to your LAN at the proxy.
 
+The mod page runs at most 4 downloads at once per client address; the
+launcher waits for a free one. Without `PANEL_TRUSTED_PROXIES`, every player
+behind the proxy shares the proxy's address, and these 4 downloads.
+
 ## Launcher
 
 `launcher/` is a desktop app for players of a **non-Steam** server
 (`USE_STEAM=false`): paste the server's mod page link, and it keeps the mods in
 `~/Zomboid/mods` in sync and starts the game straight into the server with
-`-nosteam`. A Steam copy of the game works too: it is found in the Steam
-libraries and started the same way. Turn off *Join automatically* on the main
-screen to only sync the mods and start the game, then join from the game's
-menu. Set `PANEL_PUBLIC_URL` (or `PANEL_PUBLIC_GAME_ADDRESS`) so it knows where
-to connect. Builds are on the releases page and update themselves; the mod
-page links the release of the image's version (release images only, not local
-builds). Pull requests that touch the launcher get test builds, linked from a
-bot comment.
+`-nosteam`. When a mod it already has is updated, it downloads only the files
+that changed (the whole mod when most of it did). A Steam copy of the game
+works too: it is found in the Steam libraries and started the same way. Turn
+off *Join automatically* on the main screen to only sync the mods and start the
+game, then join from the game's menu. Set `PANEL_PUBLIC_URL` (or
+`PANEL_PUBLIC_GAME_ADDRESS`) so it knows where to connect. Builds are on the
+releases page and update themselves; the mod page links the release of the
+image's version (release images only, not local builds). Pull requests that
+touch the launcher get test builds, linked from a bot comment.
 
 ## Developing
 

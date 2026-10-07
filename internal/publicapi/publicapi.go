@@ -96,6 +96,7 @@ type PublicItem struct {
 	TimeUpdated time.Time   `json:"timeUpdated,omitzero"`
 	Mods        []PublicMod `json:"mods" nullable:"false"`
 	Download    PublicPack  `json:"download"`
+	Files       string      `json:"files,omitempty" doc:"Per-file listing of the download (GET, PackFiles) and partial downloads of it (POST FilesRequest, answers a zip); omitted by servers that predate it"`
 }
 
 type PublicPack struct {
@@ -104,4 +105,24 @@ type PublicPack struct {
 	Size   int64  `json:"size"`
 	SHA256 string `json:"sha256"`
 	Error  string `json:"error,omitempty"`
+}
+
+// PackFiles lists a pack's files so a client can fetch only those that differ.
+type PackFiles struct {
+	SHA256 string     `json:"sha256" doc:"The pack this listing describes"`
+	Files  []PackFile `json:"files"`
+}
+
+type PackFile struct {
+	Path   string `json:"path" doc:"Slash-separated, starting with the mod folder"`
+	Size   int64  `json:"size"`
+	Packed int64  `json:"packed" doc:"Compressed size in the pack"`
+	SHA256 string `json:"sha256"`
+}
+
+// FilesRequest selects files of a PackFiles listing by index; the server
+// answers 409 when SHA256 is no longer its current pack.
+type FilesRequest struct {
+	SHA256 string `json:"sha256"`
+	Files  []int  `json:"files"`
 }
