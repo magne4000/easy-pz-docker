@@ -5,63 +5,24 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/gofiber/fiber/v3/middleware/limiter"
 
 	"github.com/magne4000/easy-pz-docker/internal/mods"
+	"github.com/magne4000/easy-pz-docker/internal/publicapi"
+	"github.com/magne4000/easy-pz-docker/internal/pz"
+	"github.com/magne4000/easy-pz-docker/internal/pz/gamever"
 	"github.com/magne4000/easy-pz-docker/internal/steam"
 	"github.com/magne4000/easy-pz-docker/internal/webui"
 )
-
-// PublicData feeds the unauthenticated mod page, reachable only through the
-// unlisted token in its URL.
-type PublicData struct {
-	ServerName    string       `json:"serverName"`
-	Status        string       `json:"status" enum:"available,restarting,unavailable"`
-	StatusMessage string       `json:"statusMessage"`
-	Players       *int         `json:"players"`
-	Collection    *PublicLink  `json:"collection,omitempty"`
-	Items         []PublicItem `json:"items" nullable:"false"`
-	ModsLine      string       `json:"modsLine"`
-	MapLine       string       `json:"mapLine"`
-	IniName       string       `json:"iniName"`
-	Pack          PublicPack   `json:"pack"`
-	GeneratedAt   time.Time    `json:"generatedAt"`
-}
-
-type PublicLink struct {
-	ID  string `json:"id"`
-	URL string `json:"url"`
-}
-
-type PublicMod struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Folder string `json:"folder"`
-}
-
-type PublicItem struct {
-	WorkshopID  string      `json:"workshopId"`
-	Title       string      `json:"title"`
-	URL         string      `json:"url"`
-	Size        int64       `json:"size"`
-	TimeUpdated time.Time   `json:"timeUpdated,omitzero"`
-	Mods        []PublicMod `json:"mods" nullable:"false"`
-	Download    PublicPack  `json:"download"`
-}
-
-type PublicPack struct {
-	URL    string `json:"url"`
-	Ready  bool   `json:"ready"`
-	Size   int64  `json:"size"`
-	SHA256 string `json:"sha256"`
-	Error  string `json:"error,omitempty"`
-}
 
 var statusMessages = map[string]string{
 	"available":   "The server is up. Come on in.",
@@ -97,9 +58,70 @@ func newPublicSet(ms []mods.ModInfo, installed map[string]steam.WorkshopItemStat
 	return ps
 }
 
-func packInfo(d Deps, key string, ms []mods.ModInfo, url string) PublicPack {
+// publicConnect prefers the ini's DefaultPort, which the admin may have edited.
+func publicConnect(d Deps) *publicapi.PublicConnect {
+	if d.Cfg.PublicHost == "" {
+		return nil
+	}
+	port := d.Cfg.DefaultPort
+	if ini, err := pz.ReadIniFile(iniPath(d)); err == nil {
+		if v, ok := ini.Get("DefaultPort"); ok {
+			if p, err := strconv.Atoi(v); err == nil && p > 0 && p < 65536 {
+				port = p
+			}
+		}
+	}
+	return &publicapi.PublicConnect{Host: d.Cfg.PublicHost, Port: port}
+}
+
+// releaseVersion matches the git tag CI stamps on release images. Local
+// builds ("dev", git describe) and pre-release tags get no launcher link.
+var releaseVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// publicLauncher is omitted in Steam mode: the launcher always starts the game
+// with -nosteam, which cannot join a Steam server.
+func publicLauncher(d Deps) *publicapi.PublicLauncher {
+	if d.Cfg.UseSteam || !releaseVersion.MatchString(d.Version) {
+		return nil
+	}
+	return publicapi.NewPublicLauncher(d.Version)
+}
+
+// jarVersion re-reads the jar only when it changes.
+type jarVersion struct {
+	mu      sync.Mutex
+	path    string
+	modTime time.Time
+	size    int64
+	version string
+}
+
+var serverGameVersion jarVersion
+
+func (j *jarVersion) get(path string) string {
+	st, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.path == path && j.modTime.Equal(st.ModTime()) && j.size == st.Size() {
+		return j.version
+	}
+	j.path, j.modTime, j.size, j.version = path, st.ModTime(), st.Size(), ""
+	if v, err := gamever.FromJar(path); err == nil {
+		j.version = v.String()
+	}
+	return j.version
+}
+
+func serverJar(d Deps) string {
+	return filepath.Join(d.Cfg.InstallDir, "java", "projectzomboid.jar")
+}
+
+func packInfo(d Deps, key string, ms []mods.ModInfo, url string) publicapi.PublicPack {
 	p, ready, err := d.Packer.Get(key, ms)
-	out := PublicPack{URL: url, Ready: ready, Size: p.Size, SHA256: p.SHA256}
+	out := publicapi.PublicPack{URL: url, Ready: ready, Size: p.Size, SHA256: p.SHA256}
 	if err != nil {
 		out.Error = "building the archive failed; it will be retried"
 	}
@@ -136,16 +158,19 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		ps := newPublicSet(ms, installed)
 		base := "/mods/" + c.Params("token") + "/"
 		cfgName := d.Cfg.ServerName
-		out := PublicData{ServerName: cfgName, Status: d.Coord.Availability(), Items: []PublicItem{}, IniName: cfgName + ".ini",
+		out := publicapi.PublicData{ServerName: cfgName, Status: d.Coord.Availability(), Items: []publicapi.PublicItem{}, IniName: cfgName + ".ini",
 			GeneratedAt: time.Now().UTC()}
 		out.StatusMessage = statusMessages[out.Status]
+		out.Connect = publicConnect(d)
+		out.Launcher = publicLauncher(d)
+		out.GameVersion = serverGameVersion.get(serverJar(d))
 		if out.Status == "available" {
 			if p := d.Coord.Players(c.Context()); p.Count != nil {
 				out.Players = p.Count
 			}
 		}
 		if col := d.Settings.Get().WorkshopCollection; col != "" {
-			out.Collection = &PublicLink{ID: col, URL: workshopURL(col)}
+			out.Collection = &publicapi.PublicLink{ID: col, URL: workshopURL(col)}
 		}
 		titles := map[string]string{}
 		sizes := map[string]int64{}
@@ -159,10 +184,10 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 			ms := ps.byItem[id]
 			key := mods.PackKey(ms, ps.updated)
 			keep = append(keep, key)
-			it := PublicItem{WorkshopID: id, Title: titles[id], URL: workshopURL(id), Size: sizes[id], TimeUpdated: ps.updated[id], Mods: []PublicMod{},
+			it := publicapi.PublicItem{WorkshopID: id, Title: titles[id], URL: workshopURL(id), Size: sizes[id], TimeUpdated: ps.updated[id], Mods: []publicapi.PublicMod{},
 				Download: packInfo(d, key, ms, base+"download/"+id+".zip")}
 			for _, m := range ms {
-				it.Mods = append(it.Mods, PublicMod{ID: m.ID, Name: m.Name, Folder: m.FolderName})
+				it.Mods = append(it.Mods, publicapi.PublicMod{ID: m.ID, Name: m.Name, Folder: m.FolderName})
 			}
 			out.Items = append(out.Items, it)
 		}

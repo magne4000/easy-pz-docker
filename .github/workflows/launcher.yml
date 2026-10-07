@@ -1,0 +1,172 @@
+name: launcher
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["launcher/**", "internal/publicapi/**", "internal/pz/gamever/**", ".github/workflows/launcher.yml"]
+  pull_request:
+    paths: ["launcher/**", "internal/publicapi/**", "internal/pz/gamever/**", ".github/workflows/launcher.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a PR supersedes its running build, so the comment never
+# regresses to older artifacts.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: launcher
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: launcher/go.mod
+          cache-dependency-path: launcher/go.sum
+      - uses: oven-sh/setup-bun@v2
+      - name: Linux build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: wails3 CLI (version pinned by go.mod)
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
+      - run: bun install --frozen-lockfile
+        working-directory: launcher/frontend
+      - run: bunx biome ci .
+        working-directory: launcher/frontend
+      - run: bun run build
+        working-directory: launcher/frontend
+      - run: go vet ./...
+      - run: go test -race ./...
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.13.2
+          working-directory: launcher
+          args: --config ../.golangci.yml
+      # The committed bindings must match the Go services.
+      - run: wails3 generate bindings -clean=true -ts
+      - run: git diff --exit-code -- frontend/bindings
+
+  # PRs build what the merge into the base branch would release (the paths
+  # filter above limits this to launcher changes); main pushes only check.
+  build:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: easypz-launcher-linux-amd64
+          - os: ubuntu-24.04-arm
+            asset: easypz-launcher-linux-arm64
+          - os: windows-latest
+            asset: easypz-launcher-windows-amd64.exe
+          - os: macos-latest
+            asset: easypz-launcher-darwin-universal.zip
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: launcher/go.mod
+          cache-dependency-path: launcher/go.sum
+      - uses: oven-sh/setup-bun@v2
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev
+      - shell: bash
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v3)
+      - name: Build
+        shell: bash
+        env:
+          VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'dev' }}
+        run: |
+          mkdir -p dist
+          case "${{ runner.os }}" in
+            Linux)
+              wails3 task build VERSION="$VERSION"
+              cp bin/easypz-launcher "dist/${{ matrix.asset }}" ;;
+            Windows)
+              wails3 task build VERSION="$VERSION"
+              cp bin/easypz-launcher.exe "dist/${{ matrix.asset }}" ;;
+            macOS)
+              wails3 task darwin:package:universal VERSION="$VERSION"
+              (cd bin && ditto -c -k --keepParent easypz-launcher.app "../dist/${{ matrix.asset }}") ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: launcher/dist/${{ matrix.asset }}
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      # selfupdate verifies downloads against this file.
+      - run: cd assets && sha256sum easypz-launcher-* > checksums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: assets/*
+
+  comment:
+    needs: build
+    # Fork PRs get a read-only token; their artifacts stay on the run page.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const marker = "<!-- launcher-artifacts -->";
+            const { owner, repo } = context.repo;
+            const pr = context.payload.pull_request;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            const all = await github.paginate(github.rest.actions.listWorkflowRunArtifacts, {
+              owner, repo, run_id: context.runId, per_page: 100,
+            });
+            // A full re-run uploads the same names again; keep the newest.
+            const byName = new Map();
+            for (const a of all.sort((a, b) => a.id - b.id)) {
+              if (a.name.startsWith("easypz-launcher-")) byName.set(a.name, a);
+            }
+            const artifacts = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+            const expires = artifacts.map((a) => a.expires_at).sort()[0]?.slice(0, 10);
+            const body = [
+              marker,
+              "### Launcher builds",
+              "",
+              `\`${pr.head.sha.slice(0, 7)}\` merged into \`${pr.base.ref}\` ([run](${runUrl})).`,
+              "",
+              "| Build | Size |",
+              "| --- | --- |",
+              ...artifacts.map((a) => `| [${a.name}](${runUrl}/artifacts/${a.id}) | ${(a.size_in_bytes / 2 ** 20).toFixed(1)} MiB |`),
+              "",
+              `Zipped, downloading needs a GitHub login, expires ${expires}. Version \`dev\`: these builds never self-update.`,
+            ].join("\n");
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner, repo, issue_number: pr.number, per_page: 100,
+            });
+            const existing = comments.find((c) => c.user?.login === "github-actions[bot]" && c.body?.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+            }

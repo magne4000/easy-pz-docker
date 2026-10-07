@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 type Pack = Schemas["PublicPack"];
 type PublicData = Schemas["PublicData"];
+type Launcher = Schemas["PublicLauncher"];
 
 // The sed/PowerShell one-liners. They only replace existing
 // lines, which is why the page also shows the full lines as a fallback.
@@ -65,6 +66,57 @@ function PackButton({ pack, label }: { pack: Pack; label: string }) {
         <Download /> {label} ({formatBytes(pack.size)})
       </a>
     </Button>
+  );
+}
+
+const platformLabel: Record<string, string> = {
+  "windows-amd64": "Windows",
+  "darwin-universal": "macOS",
+  "linux-amd64": "Linux x64",
+  "linux-arm64": "Linux ARM64",
+};
+
+function LauncherCard({ launcher }: { launcher: Launcher }) {
+  const { t } = useTranslation();
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("Use the launcher")}</CardTitle>
+        <CardDescription>
+          {t(
+            "It keeps your mods in sync with the server and starts the game straight into it. The Steam copy of the game works too.",
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 text-sm">
+        <ol className="list-decimal space-y-3 pl-5">
+          <li className="space-y-2">
+            <p>{t("Download it for your system:")}</p>
+            <div className="flex flex-wrap gap-2">
+              {launcher.downloads.map((d) => (
+                <Button key={d.url} asChild variant="outline">
+                  <a href={d.url}>
+                    <Download /> {platformLabel[`${d.os}-${d.arch}`] ?? `${d.os} ${d.arch}`}
+                  </a>
+                </Button>
+              ))}
+            </div>
+          </li>
+          <li className="space-y-2">
+            <p>{t("Open it and add this server with this page's link:")}</p>
+            <CopyBlock text={window.location.origin + window.location.pathname} />
+          </li>
+        </ol>
+        <a
+          href={launcher.releaseUrl}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="text-muted-foreground inline-flex items-center gap-1 text-xs hover:underline"
+        >
+          {t("Launcher {{version}}", { version: launcher.version })} <ExternalLink className="size-3" />
+        </a>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -146,9 +198,12 @@ export function ModsPage() {
           <TabsTrigger value="host">{t("Running this mod set yourself")}</TabsTrigger>
         </TabsList>
         <TabsContent value="join" className="space-y-4">
+          {data.launcher && <LauncherCard launcher={data.launcher} />}
           <Card>
             <CardHeader>
-              <CardTitle>{t("Install the mods")}</CardTitle>
+              <CardTitle>
+                {data.launcher ? t("Or install the mods by hand") : t("Install the mods")}
+              </CardTitle>
               <CardDescription>
                 {t("You only need the files. The server tells your game which mods to load.")}
               </CardDescription>
