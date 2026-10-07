@@ -1156,6 +1156,8 @@ export interface components {
             generatedAt: string;
             iniName: string;
             items: components["schemas"]["PublicItem"][];
+            /** @description Launcher release of this server's version; omitted in Steam mode and on unreleased builds */
+            launcher?: components["schemas"]["PublicLauncher"];
             mapLine: string;
             modsLine: string;
             pack: components["schemas"]["PublicPack"];
@@ -1165,6 +1167,13 @@ export interface components {
             /** @enum {string} */
             status: "available" | "restarting" | "unavailable";
             statusMessage: string;
+        };
+        PublicDownload: {
+            /** @enum {string} */
+            arch: "amd64" | "arm64" | "universal";
+            /** @enum {string} */
+            os: "windows" | "darwin" | "linux";
+            url: string;
         };
         PublicItem: {
             download: components["schemas"]["PublicPack"];
@@ -1176,6 +1185,11 @@ export interface components {
             title: string;
             url: string;
             workshopId: string;
+        };
+        PublicLauncher: {
+            downloads: components["schemas"]["PublicDownload"][];
+            releaseUrl: string;
+            version: string;
         };
         PublicLink: {
             id: string;

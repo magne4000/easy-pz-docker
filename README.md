@@ -14,7 +14,7 @@ backups, scheduling and the web UI.
 - **Mods**: track Workshop items or import a collection, per-mod enable, dependency-aware load order, conflict scan, `Mods=` / `WorkshopItems=` / `Map=` written for you. In non-Steam mode (`USE_STEAM=false`) mods are downloaded with anonymous SteamCMD and mirrored into the server's `mods/` folder as per-file symlinks (no copies; PZ drops a mod's scripts when its whole folder is one symlink), with a boot-time check that refuses to start with missing mods. Mods added while the server runs are downloaded right away and load at the next restart.
 - **Backups**: world + account database + server config (never the multi-GB mods), tar+zstd with a checksummed manifest. A backup is only taken when the world changed, so every archive is a distinct state. This relies on `PauseEmpty=true` (PZ's default): with it off the game clock runs on an empty server, every backup is taken, and the UI says so. Keep N recent + daily + weekly, optional size budget, pinning, verified restore with an automatic safety backup.
 - **Scheduler**: cron schedules for restarts, stops, saves, broadcasts and backups.
-- **Player mod page**: an unlisted, `noindex` link where players download the exact mod set as a zip (with resume support and a checksum), plus the config snippet for people hosting the same set.
+- **Player mod page**: an unlisted, `noindex` link where players download the exact mod set as a zip (with resume support and a checksum), plus the config snippet for people hosting the same set. Non-Steam servers also link the launcher released with the image's version.
 - **Server config**: structured editor for the server `.ini`, with *save & reload*.
 - **Sandbox options**: structured editor for `<server>_SandboxVars.lua` with ranges, defaults and choices. Enabled mods' options appear like in the game's sandbox editor: on the mod's page, with its translated names, tooltips and choices (from the mod's `sandbox-options.txt` and English `Sandbox.json`), including options the server has not written to the file yet. Changes apply at the next start.
 - **Launcher** (non-Steam servers): syncs mods and joins the server, with a Steam or non-Steam copy of the game. See [Launcher](#launcher).
@@ -106,8 +106,10 @@ if you publish the mod page to the internet, restrict everything except
 `~/Zomboid/mods` in sync and starts the game straight into the server with
 `-nosteam`. A Steam copy of the game works too: it is found in the Steam
 libraries and started the same way. Set `PANEL_PUBLIC_HOST` so it knows
-where to connect. Builds are on the releases page and update themselves. Pull
-requests that touch the launcher get test builds, linked from a bot comment.
+where to connect. Builds are on the releases page and update themselves; the
+mod page links the release of the image's version (release images only, not
+local builds). Pull requests that touch the launcher get test builds, linked
+from a bot comment.
 
 ## Developing
 

@@ -29,6 +29,25 @@ func TestPublicConnect(t *testing.T) {
 	require.Equal(t, 16261, publicConnect(d).Port, "invalid ini value: env default")
 }
 
+func TestPublicLauncher(t *testing.T) {
+	d := Deps{Cfg: testConfig(), Version: "v0.2.0"}
+	rel := "https://github.com/magne4000/easy-pz-docker/releases/"
+	require.Equal(t, &publicapi.PublicLauncher{Version: "v0.2.0", ReleaseURL: rel + "tag/v0.2.0", Downloads: []publicapi.PublicDownload{
+		{OS: "windows", Arch: "amd64", URL: rel + "download/v0.2.0/easypz-launcher-windows-amd64.exe"},
+		{OS: "darwin", Arch: "universal", URL: rel + "download/v0.2.0/easypz-launcher-darwin-universal.zip"},
+		{OS: "linux", Arch: "amd64", URL: rel + "download/v0.2.0/easypz-launcher-linux-amd64"},
+		{OS: "linux", Arch: "arm64", URL: rel + "download/v0.2.0/easypz-launcher-linux-arm64"},
+	}}, publicLauncher(d))
+
+	for _, v := range []string{"dev", "", "main", "v0.2.0-3-gf058b26", "v0.2.0-dirty", "v0.2.0-rc.1", "v0.2", "0.2.0"} {
+		d.Version = v
+		require.Nil(t, publicLauncher(d), "no release for %q", v)
+	}
+
+	d.Version, d.Cfg.UseSteam = "v0.2.0", true
+	require.Nil(t, publicLauncher(d), "Steam mode: the launcher's -nosteam cannot join")
+}
+
 func TestJarVersionUnreadable(t *testing.T) {
 	var j jarVersion
 	dir := t.TempDir()

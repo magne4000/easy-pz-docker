@@ -13,13 +13,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-)
 
-func TestAssetName(t *testing.T) {
-	require.Equal(t, "easypz-launcher-windows-amd64.exe", AssetName("windows", "amd64"))
-	require.Equal(t, "easypz-launcher-linux-arm64", AssetName("linux", "arm64"))
-	require.Equal(t, "easypz-launcher-darwin-universal.zip", AssetName("darwin", "arm64"))
-}
+	"github.com/magne4000/easy-pz-docker/internal/publicapi"
+)
 
 func TestParseChecksums(t *testing.T) {
 	got := parseChecksums([]byte("aa  easypz-launcher-linux-amd64\nbb *checksums.txt\n\nbad line here\n"))
@@ -29,8 +25,8 @@ func TestParseChecksums(t *testing.T) {
 func releaseServer(t *testing.T, tag string, payload []byte, sum string) *httptest.Server {
 	mux := http.NewServeMux()
 	var srv *httptest.Server
-	name := AssetName(runtime.GOOS, runtime.GOARCH)
-	mux.HandleFunc("/repos/"+Repo+"/releases/latest", func(w http.ResponseWriter, r *http.Request) {
+	name := publicapi.LauncherAsset(runtime.GOOS, runtime.GOARCH)
+	mux.HandleFunc("/repos/"+publicapi.LauncherRepo+"/releases/latest", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{"tag_name": tag, "html_url": "https://example/r",
 			"assets": []map[string]string{
 				{"name": name, "browser_download_url": srv.URL + "/dl/bin"},

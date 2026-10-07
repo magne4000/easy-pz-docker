@@ -74,6 +74,19 @@ func publicConnect(d Deps) *publicapi.PublicConnect {
 	return &publicapi.PublicConnect{Host: d.Cfg.PublicHost, Port: port}
 }
 
+// releaseVersion matches the git tag CI stamps on release images. Local
+// builds ("dev", git describe) and pre-release tags get no launcher link.
+var releaseVersion = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+$`)
+
+// publicLauncher is omitted in Steam mode: the launcher always starts the game
+// with -nosteam, which cannot join a Steam server.
+func publicLauncher(d Deps) *publicapi.PublicLauncher {
+	if d.Cfg.UseSteam || !releaseVersion.MatchString(d.Version) {
+		return nil
+	}
+	return publicapi.NewPublicLauncher(d.Version)
+}
+
 // jarVersion re-reads the jar only when it changes.
 type jarVersion struct {
 	mu      sync.Mutex
@@ -149,6 +162,7 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 			GeneratedAt: time.Now().UTC()}
 		out.StatusMessage = statusMessages[out.Status]
 		out.Connect = publicConnect(d)
+		out.Launcher = publicLauncher(d)
 		out.GameVersion = serverGameVersion.get(serverJar(d))
 		if out.Status == "available" {
 			if p := d.Coord.Players(c.Context()); p.Count != nil {

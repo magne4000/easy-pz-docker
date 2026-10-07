@@ -18,12 +18,12 @@ import (
 	"time"
 
 	"golang.org/x/mod/semver"
+
+	"github.com/magne4000/easy-pz-docker/internal/publicapi"
 )
 
 const (
-	Repo         = "magne4000/easy-pz-docker"
 	checksums    = "checksums.txt"
-	assetPrefix  = "easypz-launcher-"
 	MacAppBundle = "easypz-launcher.app"
 )
 
@@ -37,17 +37,6 @@ type Release struct {
 type asset struct {
 	Name string `json:"name"`
 	URL  string `json:"browser_download_url"`
-}
-
-func AssetName(goos, goarch string) string {
-	switch goos {
-	case "windows":
-		return assetPrefix + "windows-" + goarch + ".exe"
-	case "darwin":
-		return assetPrefix + "darwin-universal.zip"
-	default:
-		return assetPrefix + goos + "-" + goarch
-	}
 }
 
 type Updater struct {
@@ -64,7 +53,7 @@ func (u *Updater) Check(ctx context.Context) (*Release, error) {
 	if !semver.IsValid(u.Current) {
 		return nil, nil // dev build
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.API+"/repos/"+Repo+"/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.API+"/repos/"+publicapi.LauncherRepo+"/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +78,7 @@ func (u *Updater) Check(ctx context.Context) (*Release, error) {
 		return nil, nil
 	}
 	rel := &Release{Version: gh.Tag, URL: gh.URL}
-	want := AssetName(runtime.GOOS, runtime.GOARCH)
+	want := publicapi.LauncherAsset(runtime.GOOS, runtime.GOARCH)
 	for _, a := range gh.Assets {
 		switch a.Name {
 		case want:
