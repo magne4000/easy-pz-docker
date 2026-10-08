@@ -85,4 +85,5 @@ func TestCandidatesReadSteamLibraries(t *testing.T) {
 		return ""
 	})
 	require.True(t, strings.Contains(strings.Join(win, "|"), "Steam"), win)
+	require.Contains(t, win, filepath.Join(`C:\Program Files (x86)`, "GOG Galaxy", "Games", "Project Zomboid"))
 }

@@ -83,3 +83,10 @@ func TestReadMissing(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, servers)
 }
+
+// Regression: Windows home paths produced "file://C:/...", which SQLite
+// rejects ("invalid uri authority: C:"), so saved servers never showed up.
+func TestReadOnlyURIWindowsDrive(t *testing.T) {
+	require.Equal(t, "file:///C:/Users/Bob/Zomboid/db/ServerList.db?mode=ro&_pragma=busy_timeout(3000)",
+		readOnlyURI("C:/Users/Bob/Zomboid/db/ServerList.db"))
+}

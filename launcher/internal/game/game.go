@@ -15,6 +15,11 @@ import (
 
 const steamFolder = "ProjectZomboid"
 
+const (
+	gogFolder    = "Project Zomboid"
+	gogProductID = "1453298883"
+)
+
 const macBundle = "Project Zomboid.app"
 
 type Install struct {
@@ -116,11 +121,16 @@ func candidates(goos, home string, getenv func(string) string) []string {
 	var steamRoots, extra []string
 	switch goos {
 	case "windows":
+		extra = gogInstallDirs()
 		for _, env := range []string{"ProgramFiles(x86)", "ProgramFiles"} {
 			if pf := getenv(env); pf != "" {
 				steamRoots = append(steamRoots, filepath.Join(pf, "Steam"))
-				extra = append(extra, filepath.Join(pf, steamFolder), filepath.Join(pf, "Project Zomboid"))
+				extra = append(extra, filepath.Join(pf, steamFolder), filepath.Join(pf, gogFolder),
+					filepath.Join(pf, "GOG Galaxy", "Games", gogFolder))
 			}
+		}
+		if drive := getenv("SystemDrive"); drive != "" {
+			extra = append(extra, filepath.Join(drive+`\`, "GOG Games", gogFolder))
 		}
 	case "darwin":
 		steamRoots = []string{filepath.Join(home, "Library", "Application Support", "Steam")}

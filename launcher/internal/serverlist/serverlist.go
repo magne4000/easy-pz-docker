@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -45,8 +46,7 @@ func Read(ctx context.Context, path string) ([]Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs), RawQuery: "mode=ro&_pragma=busy_timeout(3000)"}
-	db, err := sql.Open("sqlite", u.String())
+	db, err := sql.Open("sqlite", readOnlyURI(abs))
 	if err != nil {
 		return nil, fmt.Errorf("open server list: %w", err)
 	}
@@ -94,6 +94,17 @@ func Read(ctx context.Context, path string) ([]Server, error) {
 		}
 	}
 	return servers, arows.Err()
+}
+
+// readOnlyURI builds a SQLite file URI. The path must start with a slash:
+// "file://C:/..." makes SQLite read "C:" as the URI authority and fail.
+func readOnlyURI(abs string) string {
+	p := filepath.ToSlash(abs)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	u := url.URL{Scheme: "file", Path: p, RawQuery: "mode=ro&_pragma=busy_timeout(3000)"}
+	return u.String()
 }
 
 func Find(servers []Server, host string, port int) (Server, bool) {
