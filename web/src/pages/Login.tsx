@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 export function Login() {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,6 +50,7 @@ export function Login() {
               <Input
                 id="username"
                 autoComplete="username"
+                autoFocus
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
@@ -60,13 +61,12 @@ export function Login() {
                 id="password"
                 type="password"
                 autoComplete="current-password"
-                autoFocus
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
             </div>
             {error && <p className="text-destructive text-sm">{error}</p>}
-            <Button type="submit" className="w-full" disabled={busy || !password}>
+            <Button type="submit" className="w-full" disabled={busy || !username || !password}>
               {busy && <Loader2 className="animate-spin" />}
               {t("Sign in")}
             </Button>
