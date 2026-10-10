@@ -464,7 +464,7 @@ func (t *wsTracker) missing() []string {
 // dirBytes totals the regular files under dir, skipping whatever vanishes mid-walk.
 func dirBytes(dir string) int64 {
 	var n int64
-	filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error { // never fails: the callback returns nil
 		if err == nil && d.Type().IsRegular() {
 			if fi, err := d.Info(); err == nil {
 				n += fi.Size()
