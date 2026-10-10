@@ -97,7 +97,9 @@ func (c *stubCMD) LatestBuildID(context.Context, string) (string, error) { retur
 func (c *stubCMD) InstalledBuild(context.Context) (steam.AppManifest, error) {
 	return steam.AppManifest{BuildID: "1"}, nil
 }
-func (c *stubCMD) WorkshopDownload(context.Context, []string, func(steam.Progress)) error { return nil }
+func (c *stubCMD) WorkshopDownload(context.Context, []steam.WorkshopItem, func(steam.Progress)) error {
+	return nil
+}
 func (c *stubCMD) WorkshopInstalled(context.Context) (map[string]steam.WorkshopItemState, error) {
 	return map[string]steam.WorkshopItemState{}, nil
 }

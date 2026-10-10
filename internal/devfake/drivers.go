@@ -364,16 +364,26 @@ func (c *CMD) InstalledBuild(ctx context.Context) (steam.AppManifest, error) {
 	return steam.ReadAppManifest(c.installDir)
 }
 
-func (c *CMD) WorkshopDownload(ctx context.Context, ids []string, onProgress func(steam.Progress)) error {
+func (c *CMD) WorkshopDownload(ctx context.Context, items []steam.WorkshopItem, onProgress func(steam.Progress)) error {
 	if onProgress == nil {
 		onProgress = func(steam.Progress) {}
 	}
+	onProgress(steam.Progress{Phase: "login", Message: "Connecting to Steam"})
 	c.say("Connecting anonymously to Steam Public...OK")
-	for i, id := range ids {
-		if err := sleepCtx(ctx, 700*time.Millisecond); err != nil {
-			return err
-		}
+	const steps = 4
+	for i, w := range items {
+		id := w.ID
 		it := item(id)
+		c.say("Downloading item " + id + " ...")
+		for step := 1; step <= steps; step++ {
+			if err := sleepCtx(ctx, 700*time.Millisecond/steps); err != nil {
+				return err
+			}
+			got := it.size * int64(step) / steps
+			c.say(fmt.Sprintf("Downloading item %s: %d of %d bytes", id, got, it.size))
+			onProgress(steam.Progress{Phase: "workshop", Percent: 100 * (float64(i) + float64(step)/steps) / float64(len(items)),
+				Message: fmt.Sprintf("Downloading %s (%d/%d): %d of %d bytes", it.title, i+1, len(items), got, it.size)})
+		}
 		updated := remoteUpdated(c.sc, id)
 		if err := writeItem(c.installDir, id, it); err != nil {
 			return err
@@ -381,9 +391,7 @@ func (c *CMD) WorkshopDownload(ctx context.Context, ids []string, onProgress fun
 		if err := c.setWorkshopState(id, &steam.WorkshopItemState{ID: id, Size: it.size, TimeUpdated: updated}); err != nil {
 			return err
 		}
-		msg := fmt.Sprintf("Success. Downloaded item %s to \"%s\" (%d bytes)", id, steam.WorkshopContentDir(c.installDir, id), it.size)
-		c.say(msg)
-		onProgress(steam.Progress{Phase: "workshop", Percent: 100 * float64(i+1) / float64(len(ids)), Message: msg})
+		c.say(fmt.Sprintf("Success. Downloaded item %s to \"%s\" (%d bytes)", id, steam.WorkshopContentDir(c.installDir, id), it.size))
 	}
 	return nil
 }

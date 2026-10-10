@@ -104,6 +104,12 @@ func WorkshopContentDir(installDir, id string) string {
 	return filepath.Join(WorkshopContentRoot(installDir), id)
 }
 
+// workshopStagingDir is where steamcmd writes an item while it downloads it;
+// on success it moves the files to WorkshopContentDir.
+func workshopStagingDir(installDir, id string) string {
+	return filepath.Join(installDir, "steamapps", "workshop", "downloads", WorkshopAppID, id)
+}
+
 // ParseAppInfoBuildID extracts depots.branches.<branch>.buildid from noisy
 // `app_info_print 380870` output.
 func ParseAppInfoBuildID(output, branch string) (string, error) {

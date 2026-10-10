@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -142,7 +143,7 @@ func TestAppUpdateParsing(t *testing.T) {
 	s.o.Guard = func() error { return errors.New("server running") }
 	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "server running")
 	// Adding a mod while the server runs must still download it.
-	require.NoError(t, s.WorkshopDownload(context.Background(), []string{"1"}, nil))
+	require.NoError(t, s.WorkshopDownload(context.Background(), []WorkshopItem{{ID: "1"}}, nil))
 }
 
 func TestAppUpdateRetriesMissingConfiguration(t *testing.T) {
@@ -170,10 +171,85 @@ func TestAppUpdateRetriesMissingConfiguration(t *testing.T) {
 }
 
 func TestWorkshopDownloadParsing(t *testing.T) {
-	s, _ := newTest("Success. Downloaded item 1 to \"/x\" (10 bytes)\nERROR! Download item 2 failed (Failure).\n", time.Second)
-	err := s.WorkshopDownload(context.Background(), []string{"1", "2"}, nil)
+	// The real transcript's shape: messages run together on one line.
+	s, ps := newTest("Downloading item 1 ...\nSuccess. Downloaded item 1 to \"/x\" (10 bytes) Downloading item 2 ...\nERROR! Download item 2 failed (Failure).\n", time.Second)
+	err := s.WorkshopDownload(context.Background(), []WorkshopItem{{ID: "1"}, {ID: "2"}}, func(p Progress) { *ps = append(*ps, p) })
 	require.ErrorContains(t, err, "2 (Failure)")
 	require.NotContains(t, err.Error(), "1 (")
+	var msgs []string
+	for _, p := range *ps {
+		msgs = append(msgs, p.Message)
+	}
+	require.Equal(t, []string{"Connecting to Steam", "Downloading item 1 (1/2)", "Downloaded item 1 (1/2)", "Downloading item 2 (2/2)"}, msgs)
+}
+
+// steamcmd prints nothing between "Downloading item" and "Success": the bytes
+// it stages are the progress, and they keep the watchdog off a slow download.
+func TestWorkshopDownloadProgressFromStagedBytes(t *testing.T) {
+	install := t.TempDir()
+	var mu sync.Mutex
+	var console []string
+	s := NewSteamCMD(Options{InstallDir: install, Stall: 300 * time.Millisecond, UID: -1,
+		OnLine: func(l string) { mu.Lock(); console = append(console, l); mu.Unlock() }})
+	s.pollEvery = 20 * time.Millisecond
+	staging := workshopStagingDir(install, "1")
+	s.run = func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
+		pr, pw := io.Pipe()
+		go func() {
+			defer pw.Close()
+			io.WriteString(pw, "Downloading item 1 ...\n")
+			if err := os.MkdirAll(staging, 0o755); err != nil {
+				t.Error(err)
+			}
+			for i := 1; i <= 6; i++ { // silent for twice the stall timeout
+				time.Sleep(100 * time.Millisecond)
+				if err := os.WriteFile(filepath.Join(staging, "data"), make([]byte, i*100), 0o644); err != nil {
+					t.Error(err)
+				}
+			}
+			io.WriteString(pw, "Success. Downloaded item 1 to \"/x\" (1000 bytes)\n")
+		}()
+		return pr, func() error { return nil }, nil
+	}
+	var ps []Progress
+	err := s.WorkshopDownload(context.Background(), []WorkshopItem{{ID: "1", Title: "Brita", Size: 1000}},
+		func(p Progress) { mu.Lock(); ps = append(ps, p); mu.Unlock() })
+	require.NoError(t, err)
+
+	var partial bool
+	for i, p := range ps {
+		if i > 0 {
+			require.GreaterOrEqual(t, p.Percent, ps[i-1].Percent, "progress never goes back")
+		}
+		if p.Percent > 0 && p.Percent < 100 {
+			partial = true
+			require.Regexp(t, `^Downloading Brita \(1/1\): \d+ B of 1000 B$`, p.Message)
+		}
+	}
+	require.True(t, partial, "staged bytes show between start and success: %+v", ps)
+	require.Equal(t, Progress{Phase: "workshop", Percent: 100, Message: "Downloaded Brita (1/1)"}, ps[len(ps)-1])
+	require.Contains(t, strings.Join(console, "\n"), "Downloading item 1: ")
+}
+
+// Without every size the percentage counts items, never dividing by an unknown size.
+func TestWorkshopPercentWithUnknownSize(t *testing.T) {
+	install := t.TempDir()
+	stage := func(id string, n int) {
+		dir := workshopStagingDir(install, id)
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "f"), make([]byte, n), 0o644))
+	}
+	var last Progress
+	tr := newWsTracker([]WorkshopItem{{ID: "1", Size: 300}, {ID: "2"}}, func(p Progress) { last = p }, nil)
+	stage("1", 150)
+	require.True(t, tr.measure(install))
+	require.Equal(t, 25.0, last.Percent, "half of the first of two items")
+	tr.finish("1")
+	require.Equal(t, 50.0, last.Percent)
+	stage("2", 2048)
+	require.True(t, tr.measure(install))
+	require.Equal(t, Progress{Phase: "workshop", Percent: 50, Message: "Downloading item 2 (2/2): 2.0 KB"}, last)
+	require.False(t, tr.measure(install), "unchanged bytes are no progress")
 }
 
 func TestStallWatchdog(t *testing.T) {

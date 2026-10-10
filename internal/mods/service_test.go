@@ -29,9 +29,13 @@ type diskCMD struct {
 	acf     map[string]bool
 }
 
-func (c *diskCMD) WorkshopDownload(_ context.Context, ids []string, _ func(steam.Progress)) error {
+func (c *diskCMD) WorkshopDownload(_ context.Context, items []steam.WorkshopItem, _ func(steam.Progress)) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	ids := make([]string, len(items))
+	for i, it := range items {
+		ids[i] = it.ID
+	}
 	c.calls = append(c.calls, ids)
 	for _, id := range ids {
 		p := filepath.Join(steam.WorkshopContentDir(c.install, id), "mods", "M"+id, "mod.info")
@@ -75,7 +79,7 @@ func newTestService(t *testing.T, loaded func() []string) (*Service, *diskCMD, *
 func TestDownloadMissingThenVerify(t *testing.T) {
 	ctx := context.Background()
 	svc, cmd, db := newTestService(t, nil)
-	require.NoError(t, cmd.WorkshopDownload(ctx, []string{"1"}, nil))
+	require.NoError(t, cmd.WorkshopDownload(ctx, []steam.WorkshopItem{{ID: "1"}}, nil))
 	cmd.calls = nil
 	for _, id := range []string{"1", "2"} {
 		_, err := db.AddItem(ctx, id, time.Now())
@@ -115,14 +119,14 @@ func TestReadsDoNotWriteEntries(t *testing.T) {
 	ctx := context.Background()
 	svc, cmd, db := newTestService(t, nil)
 	for _, id := range []string{"1", "2", "3"} {
-		require.NoError(t, cmd.WorkshopDownload(ctx, []string{id}, nil))
+		require.NoError(t, cmd.WorkshopDownload(ctx, []steam.WorkshopItem{{ID: id}}, nil))
 		_, err := db.AddItem(ctx, id, time.Now())
 		require.NoError(t, err)
 	}
 	require.NoError(t, svc.SetOrder(ctx, []string{"M2", "M1"}))
 	_, err := db.AddItem(ctx, "4", time.Now())
 	require.NoError(t, err)
-	require.NoError(t, cmd.WorkshopDownload(ctx, []string{"4"}, nil))
+	require.NoError(t, cmd.WorkshopDownload(ctx, []steam.WorkshopItem{{ID: "4"}}, nil))
 	svc.Refresh()
 
 	before, err := db.ListModEntries(ctx)

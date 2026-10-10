@@ -499,7 +499,21 @@ func (s *Service) Add(ctx context.Context, ids []string) ([]string, error) {
 
 func (s *Service) download(ctx context.Context, ids []string, h *tasks.Handle) error {
 	defer s.invalidate(ids...)
-	return s.o.CMD.WorkshopDownload(ctx, ids, func(p steam.Progress) {
+	tracked, err := s.o.DB.ListItems(ctx)
+	if err != nil {
+		return err
+	}
+	items := make([]steam.WorkshopItem, len(ids))
+	at := make(map[string]int, len(ids))
+	for i, id := range ids {
+		items[i].ID, at[id] = id, i
+	}
+	for _, it := range tracked {
+		if i, ok := at[it.WorkshopID]; ok {
+			items[i].Title, items[i].Size = it.Title, it.FileSize
+		}
+	}
+	return s.o.CMD.WorkshopDownload(ctx, items, func(p steam.Progress) {
 		if h != nil {
 			h.Progress(p.Percent, p.Message)
 		}

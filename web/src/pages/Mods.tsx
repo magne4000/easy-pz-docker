@@ -16,10 +16,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { keys } from "@/api/keys";
-import { useAction, useConflicts, useMods, useSettings } from "@/api/queries";
+import { useAction, useConflicts, useMods, useSettings, useTasks } from "@/api/queries";
 import { Confirm } from "@/components/Confirm";
 import { Empty } from "@/components/Empty";
 import { PageHeader } from "@/components/PageHeader";
+import { TaskList } from "@/components/TaskList";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +51,9 @@ function parseWorkshopIds(text: string): string[] {
 }
 
 const workshopUrl = (id: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
+
+// Task kinds that download Workshop items: additions and imports, and the update window.
+const downloadKinds: Record<string, true> = { workshop: true, "game-update": true };
 
 function AddDialog() {
   const { t } = useTranslation();
@@ -383,6 +387,10 @@ function LoadOrder({ order }: { order: string[] }) {
 export default function Mods() {
   const { t } = useTranslation();
   const mods = useMods();
+  const tasks = useTasks();
+  const downloads = (tasks.data?.items ?? []).filter(
+    (task) => task.state === "running" && downloadKinds[task.kind],
+  );
   const check = useAction(() => unwrap(api.POST("/mods/check")), {
     success: (r) =>
       r.updates?.length
@@ -427,6 +435,13 @@ export default function Mods() {
         }
       />
       <div className="mb-6 space-y-3">
+        {downloads.length > 0 && (
+          <Card className="py-4">
+            <CardContent className="px-4">
+              <TaskList tasks={downloads} />
+            </CardContent>
+          </Card>
+        )}
         {ov?.restartRequired && (
           <Alert>
             <AlertTriangle />
