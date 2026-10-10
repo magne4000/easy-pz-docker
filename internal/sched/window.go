@@ -40,7 +40,8 @@ type UpdateStatus struct {
 	InstalledBuild      string    `json:"installedBuild"`
 	LatestBuild         string    `json:"latestBuild"`
 	Branch              string    `json:"branch"`
-	GameUpdateAvailable bool      `json:"gameUpdateAvailable"`
+	GameUpdateAvailable bool      `json:"gameUpdateAvailable" doc:"a newer build exists and the game version is not locked"`
+	GameLocked          bool      `json:"gameLocked" doc:"the installed build is kept: SteamCMD never updates the game"`
 	ModUpdates          []string  `json:"modUpdates"`
 	LastCheckedAt       time.Time `json:"lastCheckedAt,omitzero"`
 	CheckError          string    `json:"checkError,omitempty"`
@@ -64,13 +65,18 @@ func (c *Coordinator) setWindow(f func(*Window)) {
 	c.publishStatus()
 }
 
+// GameLocked reports whether the installed build is kept: no app_update at
+// start or in an update window.
+func (c *Coordinator) GameLocked() bool { return c.o.Settings.Get().LockGameVersion }
+
 func (c *Coordinator) UpdateStatus() UpdateStatus {
+	locked := c.GameLocked()
 	c.mu.Lock()
 	u := c.upd
 	c.mu.Unlock()
 	return UpdateStatus{InstalledBuild: u.installed, LatestBuild: u.latest, Branch: u.branch,
-		GameUpdateAvailable: u.latest != "" && u.installed != "" && u.latest != u.installed,
-		ModUpdates:          append([]string{}, u.modUpdates...), LastCheckedAt: u.checkedAt, CheckError: u.checkErr, Window: c.Window()}
+		GameUpdateAvailable: u.newerBuild() && !locked, GameLocked: locked,
+		ModUpdates: append([]string{}, u.modUpdates...), LastCheckedAt: u.checkedAt, CheckError: u.checkErr, Window: c.Window()}
 }
 
 // RefreshInstalled reads the installed build id from the app manifest.
@@ -128,6 +134,7 @@ var ErrWindowOpen = errors.New("an update window is already open")
 // delay) → save → stop → backup → SteamCMD + workshop → reconcile → start.
 // force skips waiting for an empty server.
 func (c *Coordinator) OpenWindow(reason string, force bool) error {
+	locked := c.GameLocked()
 	c.mu.Lock()
 	if c.window.State != WindowIdle && c.window.State != WindowFailed {
 		c.mu.Unlock()
@@ -138,8 +145,7 @@ func (c *Coordinator) OpenWindow(reason string, force bool) error {
 	now := c.o.Clock.Now().UTC()
 	maxDelay := time.Duration(c.o.Settings.Get().UpdateMaxDelayMinutes) * time.Minute
 	c.window = Window{State: WindowWaiting, Reason: reason, OpenedAt: now, ForceAt: now.Add(maxDelay),
-		GameUpdate: c.upd.latest != "" && c.upd.installed != "" && c.upd.latest != c.upd.installed,
-		ModUpdates: append([]string{}, c.upd.modUpdates...)}
+		GameUpdate: c.upd.newerBuild() && !locked, ModUpdates: append([]string{}, c.upd.modUpdates...)}
 	if force {
 		c.window.ForceAt = now
 	}
@@ -283,7 +289,8 @@ func (c *Coordinator) executeWindow(ctx context.Context) (err error) {
 	if _, _, err := c.o.Backups.Run(ctx, "pre-update", "", false); err != nil && !errors.Is(err, context.Canceled) {
 		c.o.Log.Warn("pre-update backup failed", "err", err)
 	}
-	if w.GameUpdate || w.Reason == "manual" {
+	// The lock is read again here: it may have been turned on while the window waited.
+	if (w.GameUpdate || w.Reason == "manual") && !c.GameLocked() {
 		step(WindowUpdating, "Updating game files (SteamCMD)")
 		if err := c.o.CMD.AppUpdate(ctx, c.o.Cfg.ServerBranch, false, func(p steam.Progress) {
 			h.Progress(p.Percent, p.Message)

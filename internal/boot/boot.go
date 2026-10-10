@@ -277,7 +277,12 @@ func bootSequence(ctx context.Context, b bootEnv) error {
 	}
 	_, err := b.dr.cmd.InstalledBuild(ctx)
 	installed := err == nil
-	if !installed || (b.cfg.UpdateOnStart && !b.fake) {
+	update := !installed || (b.cfg.UpdateOnStart && !b.fake)
+	if update && installed && b.coord.GameLocked() { // a missing install is installed regardless
+		b.log.Info("game version locked: not updating the game at start")
+		update = false
+	}
+	if update {
 		h := b.tasks.Start("game-update", "Installing / updating game files")
 		err := b.dr.cmd.AppUpdate(ctx, b.cfg.ServerBranch, !installed, func(p steam.Progress) { h.Progress(p.Percent, p.Message) })
 		h.Finish(err)

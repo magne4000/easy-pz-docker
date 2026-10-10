@@ -24,6 +24,7 @@ type Settings struct {
 	UpdateCheckMinutes    int     `json:"updateCheckMinutes" minimum:"0" doc:"0 disables update checks"`
 	UpdateMaxDelayMinutes int     `json:"updateMaxDelayMinutes" minimum:"0" doc:"force the update window after this long"`
 	AutoUpdate            bool    `json:"autoUpdate" doc:"open the update window automatically when an update is detected"`
+	LockGameVersion       bool    `json:"lockGameVersion" doc:"keep the installed game build: SteamCMD never updates it, at start or in update windows"`
 	WarnMinutes           []int   `json:"warnMinutes" doc:"countdown warnings (minutes) before a forced restart"`
 	WorkshopCollection    string  `json:"workshopCollection" pattern:"^[0-9]*$"`
 	PublicModsPage        bool    `json:"publicModsPage"`

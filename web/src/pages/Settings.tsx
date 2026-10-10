@@ -168,6 +168,17 @@ export default function Settings() {
               <Switch checked={form.autoUpdate} onCheckedChange={(v) => set("autoUpdate", v)} />
               {t("Update automatically")}
             </label>
+            <div className="grid gap-1.5 sm:col-span-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={form.lockGameVersion} onCheckedChange={(v) => set("lockGameVersion", v)} />
+                {t("Lock game version")}
+              </label>
+              <p className="text-muted-foreground text-xs">
+                {t(
+                  "Keep the installed build: the game is never updated, neither at start nor in update windows. Workshop mods still update.",
+                )}
+              </p>
+            </div>
           </CardContent>
         </Card>
         <Card>

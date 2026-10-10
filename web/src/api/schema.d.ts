@@ -1433,6 +1433,8 @@ export interface components {
              * @description 0 means unlimited
              */
             backupMaxTotalGB: number;
+            /** @description keep the installed game build: SteamCMD never updates it, at start or in update windows */
+            lockGameVersion: boolean;
             publicModsPage: boolean;
             /**
              * Format: int64
@@ -1548,6 +1550,9 @@ export interface components {
             readonly $schema?: string;
             branch: string;
             checkError?: string;
+            /** @description the installed build is kept: SteamCMD never updates the game */
+            gameLocked: boolean;
+            /** @description a newer build exists and the game version is not locked */
             gameUpdateAvailable: boolean;
             installedBuild: string;
             /** Format: date-time */

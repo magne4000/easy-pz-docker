@@ -237,3 +237,21 @@ func TestUpdateWindowProceedsWhenEmpty(t *testing.T) {
 	require.Eventually(t, func() bool { return e.c.Window().State == WindowIdle }, 2*time.Second, time.Millisecond)
 	require.Equal(t, 1, e.cmd.updates)
 }
+
+// A locked game is never updated, not even by a manual window; a newer build is still reported.
+func TestLockedGameNeverUpdates(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	s := e.c.o.Settings.Get()
+	s.LockGameVersion = true
+	_, err := e.c.o.Settings.Update(ctx, s)
+	require.NoError(t, err)
+	st, err := e.c.CheckUpdates(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "2", st.LatestBuild)
+	require.True(t, st.GameLocked)
+	require.False(t, st.GameUpdateAvailable)
+	require.NoError(t, e.c.OpenWindow("manual", false))
+	require.Eventually(t, func() bool { return e.c.Window().State == WindowIdle }, 2*time.Second, time.Millisecond)
+	require.Zero(t, e.cmd.updates)
+}

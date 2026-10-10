@@ -10,7 +10,7 @@ backups, scheduling and the web UI.
 
 - **Server control**: start / stop / restart with in-game countdown warnings, save, broadcast, live status and player count.
 - **Console**: live server log plus an RCON terminal that recognises PZ's rejection messages.
-- **Updates**: game build and Workshop mods are checked hourly; one *update window* announces, waits for an empty server (forced after 2 h by default), saves, stops, backs up, updates the game and mods, relinks mods and starts again.
+- **Updates**: game build and Workshop mods are checked hourly; one *update window* announces, waits for an empty server (forced after 2 h by default), saves, stops, backs up, updates the game and mods, relinks mods and starts again. *Settings → Lock game version* keeps the installed build: the game is then never updated (not at start, not in update windows) while mods still are.
 - **Mods**: track Workshop items or import a collection, per-mod enable, dependency-aware load order, conflict scan, `Mods=` / `WorkshopItems=` / `Map=` written for you. In non-Steam mode (`USE_STEAM=false`) mods are downloaded with anonymous SteamCMD and mirrored into the server's `mods/` folder as per-file symlinks (no copies; PZ drops a mod's scripts when its whole folder is one symlink), with a boot-time check that refuses to start with missing mods. Mods added while the server runs are downloaded right away and load at the next restart.
 - **Backups**: world + account database + server config (never the multi-GB mods), tar+zstd with a checksummed manifest. A backup is only taken when the world changed, so every archive is a distinct state. This relies on `PauseEmpty=true` (PZ's default): with it off the game clock runs on an empty server, every backup is taken, and the UI says so. Keep N recent + daily + weekly, optional size budget, pinning, verified restore with an automatic safety backup.
 - **Scheduler**: cron schedules for restarts, stops, saves, broadcasts and backups.
@@ -65,7 +65,7 @@ Variables inherited from the broccoli image keep their names:
 | `MEMORY_XMX_GB` | `8` | JVM heap |
 | `VM_ARGS` | | extra JVM args; each one *replaces* an existing arg with the same key |
 | `SERVER_BRANCH` | public | SteamCMD beta branch |
-| `UPDATE_ON_START` | `true` | update the game before the first start |
+| `UPDATE_ON_START` | `true` | update the game before the first start (skipped while the game version is locked) |
 | `TZ` | `UTC` | used by the scheduler |
 
 Panel variables:

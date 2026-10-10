@@ -69,6 +69,10 @@ type updateInfo struct {
 	checkErr                  string
 }
 
+func (u updateInfo) newerBuild() bool {
+	return u.latest != "" && u.installed != "" && u.latest != u.installed
+}
+
 func NewCoordinator(o Options) *Coordinator {
 	if o.Log == nil {
 		o.Log = slog.Default()

@@ -3,6 +3,7 @@ import {
   Download,
   ExternalLink,
   HardDrive,
+  Lock,
   Megaphone,
   Play,
   RefreshCw,
@@ -342,12 +343,19 @@ function UpdatesCard() {
           {d?.gameUpdateAvailable && (
             <Badge className="bg-warning/15 text-warning">{t("Game update available")}</Badge>
           )}
+          {d?.gameLocked && (
+            <Badge variant="secondary">
+              <Lock /> {t("Game version locked")}
+            </Badge>
+          )}
           {mods > 0 && (
             <Badge className="bg-warning/15 text-warning">
               {t("{{count}} mod updates", { count: mods })}
             </Badge>
           )}
-          {d && !d.gameUpdateAvailable && mods === 0 && <Badge variant="secondary">{t("Up to date")}</Badge>}
+          {d && !d.gameLocked && !d.gameUpdateAvailable && mods === 0 && (
+            <Badge variant="secondary">{t("Up to date")}</Badge>
+          )}
         </div>
         {d?.checkError && <p className="text-destructive text-xs">{d.checkError}</p>}
         {w && w.state !== "idle" && (
