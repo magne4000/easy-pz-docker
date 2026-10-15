@@ -44,14 +44,7 @@ func open(dir, goos string) (Install, error) {
 	return Install{}, ErrInvalid
 }
 
-func (in Install) Jar() string {
-	for _, p := range in.jarCandidates() {
-		if fileExists(p) {
-			return p
-		}
-	}
-	return ""
-}
+func (in Install) Jar() string { return firstFile(in.jarCandidates()) }
 
 func (in Install) jarCandidates() []string {
 	if in.goos == "darwin" {
@@ -61,6 +54,25 @@ func (in Install) jarCandidates() []string {
 		filepath.Join(in.Dir, "projectzomboid.jar"),
 		filepath.Join(in.Dir, "projectzomboid", "projectzomboid.jar"),
 		filepath.Join(in.Dir, "java", "projectzomboid.jar"),
+	}
+}
+
+// steamAPI is Steam's library shipped with the game ("" when missing); see
+// track.
+func (in Install) steamAPI() string {
+	switch in.goos {
+	case "windows":
+		// Unverified: 42.12 loaded its natives from win64/, Linux has since
+		// moved them to natives/.
+		return firstFile([]string{
+			filepath.Join(in.Dir, "steam_api64.dll"),
+			filepath.Join(in.Dir, "natives", "steam_api64.dll"),
+			filepath.Join(in.Dir, "win64", "steam_api64.dll"),
+		})
+	case "darwin":
+		return firstFile([]string{filepath.Join(in.Dir, macBundle, "Contents", "MacOS", "libsteam_api.dylib")})
+	default:
+		return firstFile([]string{filepath.Join(in.Dir, "projectzomboid", "natives", "libsteam_api.so")})
 	}
 }
 
@@ -89,8 +101,9 @@ func (in Install) Command() *exec.Cmd {
 	var cmd *exec.Cmd
 	switch in.goos {
 	case "darwin":
-		// If the game already runs, open only focuses it.
-		cmd = exec.Command("open", append([]string{filepath.Join(in.Dir, macBundle), "--args"}, Args()...)...)
+		// If the game already runs, open only focuses it. -W returns when it
+		// quits, so the Steam presence process sees the game's lifetime.
+		cmd = exec.Command("open", append([]string{"-W", filepath.Join(in.Dir, macBundle), "--args"}, Args()...)...)
 	default:
 		cmd = exec.Command(in.executable(), Args()...)
 	}
@@ -99,12 +112,19 @@ func (in Install) Command() *exec.Cmd {
 	return cmd
 }
 
+// Start launches the game, then its Steam presence (see startPresence).
 func (in Install) Start() error {
 	cmd := in.Command()
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	return cmd.Process.Release()
+	pid := cmd.Process.Pid
+	// Reaped, so that the presence process sees the game exit.
+	go func() { _ = cmd.Wait() }()
+	if lib := in.steamAPI(); lib != "" {
+		startPresence(lib, pid)
+	}
+	return nil
 }
 
 func Detect() (Install, bool) {
@@ -187,4 +207,13 @@ func steamLibraries(root string) []string {
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+func firstFile(paths []string) string {
+	for _, p := range paths {
+		if fileExists(p) {
+			return p
+		}
+	}
+	return ""
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/magne4000/easy-pz-docker/launcher/internal/config"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/core"
+	"github.com/magne4000/easy-pz-docker/launcher/internal/game"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/selfupdate"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/zomboid"
 )
@@ -33,6 +34,10 @@ func (e *emitter) Emit(name string, data any) {
 }
 
 func main() {
+	// The Steam presence process, started by game.Start.
+	if len(os.Args) == 4 && os.Args[1] == game.SteamPresenceArg {
+		os.Exit(game.ServeSteamPresence(os.Args[2], os.Args[3]))
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	selfupdate.CleanupOld()
 
