@@ -1,6 +1,7 @@
 import {
   EllipsisVerticalIcon,
   ExternalLinkIcon,
+  Gamepad2Icon,
   PencilIcon,
   PlayIcon,
   RefreshCwIcon,
@@ -11,12 +12,13 @@ import {
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { type Credentials, CredentialsDialog } from "@/components/CredentialsDialog";
 import { EditServerDialog } from "@/components/EditServerDialog";
+import { autoLogins, JoinSetup } from "@/components/JoinSetup";
 import { useLaunch } from "@/components/LaunchProvider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -26,12 +28,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { App, type Config, type Core, errorMessage, Launcher, type Saved } from "@/lib/api";
+import { App, type Config, type Core, errorMessage, Launcher } from "@/lib/api";
 import { formatBytes } from "@/lib/format";
 import { useStatus } from "@/lib/hooks";
 import { cn } from "@/lib/utils";
-
-const OTHER = "__other__";
 
 const statusStyles: Record<string, string> = {
   available: "bg-success/15 text-success border-success/30",
@@ -39,50 +39,28 @@ const statusStyles: Record<string, string> = {
   unavailable: "bg-muted text-muted-foreground",
 };
 
-export function autoLoginAccounts(saved?: Saved.Server | null): Saved.Account[] {
-  return (saved?.accounts ?? []).filter((a) => a.authType === 1 && a.savePassword);
-}
-
 export function ServerCard({
   server,
   gameVersion,
-  autoConnect,
   onChanged,
 }: {
   server: Config.Server;
   gameVersion: string;
-  autoConnect: boolean;
   onChanged: () => void;
 }) {
   const { t } = useTranslation();
   const launch = useLaunch();
   const { status, error, refresh } = useStatus(server, launch.busy, launch.finished);
-  const [askCreds, setAskCreds] = useState(false);
+  const [settingUp, setSettingUp] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  const accounts = autoLoginAccounts(status?.saved);
+  const loading = !status && !error;
+  // Joining needs a login saved in the game; without one, Play only starts the game.
+  const accounts = autoLogins(status?.saved);
+  const ready = accounts.length > 0;
   const preferred = accounts.find((a) => a.username === server.account) ?? accounts[0];
   const [choice, setChoice] = useState<string | null>(null);
-  const selected = choice ?? (preferred ? String(preferred.id) : OTHER);
-
-  const play = () => {
-    if (!autoConnect) {
-      launch.run("start", server);
-    } else if (selected !== OTHER) {
-      launch.run("play", server, { accountId: Number(selected) });
-    } else {
-      setAskCreds(true);
-    }
-  };
-
-  const playWith = (c: Credentials) => {
-    setAskCreds(false);
-    launch.run("play", server, {
-      username: c.username,
-      password: c.password,
-      serverPassword: c.serverPassword,
-    });
-  };
+  const selected = choice ?? (preferred ? String(preferred.id) : "");
 
   const remove = async () => {
     try {
@@ -94,8 +72,6 @@ export function ServerCard({
   };
 
   const mismatch = !!status?.gameVersion && !!gameVersion && status.gameVersion !== gameVersion;
-  // Only joining needs the address.
-  const noAddress = autoConnect && (!server.host || !server.port);
 
   return (
     <Card className="gap-4">
@@ -124,6 +100,12 @@ export function ServerCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {ready && (
+                <DropdownMenuItem onSelect={() => launch.run("start", server)} disabled={launch.busy}>
+                  <Gamepad2Icon />
+                  {t("Start without joining")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => setEditing(true)}>
                 <PencilIcon />
                 {t("Edit")}
@@ -159,45 +141,64 @@ export function ServerCard({
         )}
         <ModsLine status={status} onSync={() => launch.run("sync", server)} disabled={launch.busy} />
         <div className="flex flex-wrap items-center gap-2">
-          {autoConnect && (
-            <Select value={selected} onValueChange={setChoice}>
-              <SelectTrigger className="w-56" aria-label={t("Account")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {accounts.map((a) => (
-                  <SelectItem key={a.id} value={String(a.id)}>
-                    {a.username}
-                  </SelectItem>
-                ))}
-                <SelectItem value={OTHER}>
-                  {accounts.length ? t("Other account…") : t("Enter a login…")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button onClick={play} disabled={launch.busy || noAddress}>
-                  <PlayIcon />
-                  {t("Play")}
+          {ready ? (
+            <>
+              {accounts.length > 1 && (
+                <Select value={selected} onValueChange={setChoice}>
+                  <SelectTrigger className="w-56" aria-label={t("Account")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={String(a.id)}>
+                        {a.username}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                onClick={() => launch.run("play", server, { accountId: Number(selected) })}
+                disabled={launch.busy}
+              >
+                <PlayIcon />
+                {t("Join")}
+              </Button>
+              {accounts.length === 1 && (
+                <span className="text-muted-foreground text-sm">
+                  {t("as {{user}}", { user: accounts[0].username })}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <Button onClick={() => launch.run("start", server)} disabled={launch.busy || loading}>
+                      <PlayIcon />
+                      {t("Play")}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t("Syncs the mods and starts the game: join the server from the game's Multiplayer menu.")}
+                </TooltipContent>
+              </Tooltip>
+              {!loading && (
+                <Button variant="link" size="sm" className="px-0" onClick={() => setSettingUp(true)}>
+                  {t("Set up auto-join")}
                 </Button>
-              </span>
-            </TooltipTrigger>
-            {noAddress && <TooltipContent>{t("Set the server's address first (Edit)")}</TooltipContent>}
-          </Tooltip>
+              )}
+            </>
+          )}
         </div>
       </CardContent>
-      <CredentialsDialog
-        key={askCreds ? "open" : "closed"}
-        open={askCreds}
-        onOpenChange={setAskCreds}
-        serverName={server.name}
-        defaultUsername={status?.saved?.accounts[0]?.username ?? ""}
-        hasSavedServerPassword={!!status?.saved}
-        onSubmit={playWith}
-      />
+      <Dialog open={settingUp} onOpenChange={setSettingUp}>
+        <DialogContent className="sm:max-w-lg">
+          <JoinSetup server={server} saved={status?.saved} onClose={() => setSettingUp(false)} />
+        </DialogContent>
+      </Dialog>
       <EditServerDialog
         open={editing}
         onOpenChange={setEditing}

@@ -66,9 +66,9 @@ func TestRead(t *testing.T) {
 	require.Equal(t, "srvpw", main.ServerPassword)
 	require.Len(t, main.Accounts, 2)
 	require.Equal(t, "alice", main.Accounts[0].Username)
-	require.True(t, main.Accounts[0].CanAutoLogin())
-	require.False(t, main.Accounts[1].CanAutoLogin(), "second factor")
-	require.False(t, servers[1].Accounts[0].CanAutoLogin(), "password not saved")
+	require.True(t, main.Accounts[0].AutoLogin)
+	require.False(t, main.Accounts[1].AutoLogin, "second factor")
+	require.False(t, servers[1].Accounts[0].AutoLogin, "password not saved")
 	require.Empty(t, servers[2].Accounts)
 
 	s, ok := Find(servers, "pz.example.com", 16261)

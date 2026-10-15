@@ -22,13 +22,6 @@ export function AddServerURL(raw: string): $CancellablePromise<config$0.Server> 
     });
 }
 
-/**
- * AutoConnect is on unless the player turned it off.
- */
-export function AutoConnect(): $CancellablePromise<boolean> {
-    return $Call.ByID(3981932562);
-}
-
 export function Game(): $CancellablePromise<$models.GameInfo> {
     return $Call.ByID(1485398853).then(($result: any) => {
         return $$createType1($result);
@@ -59,10 +52,6 @@ export function Servers(): $CancellablePromise<config$0.Server[]> {
     return $Call.ByID(3350380661).then(($result: any) => {
         return $$createType4($result);
     });
-}
-
-export function SetAutoConnect(on: boolean): $CancellablePromise<void> {
-    return $Call.ByID(3864618004, on);
 }
 
 export function SetGameDir(dir: string): $CancellablePromise<$models.GameInfo> {
