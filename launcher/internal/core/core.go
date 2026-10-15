@@ -17,7 +17,6 @@ import (
 	"github.com/magne4000/easy-pz-docker/launcher/internal/game"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/modsync"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/pzclient"
-	"github.com/magne4000/easy-pz-docker/launcher/internal/pzhash"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/serverlist"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/zomboid"
 )
@@ -91,16 +90,6 @@ func (s *Service) SetGameDir(dir string) (GameInfo, error) {
 		return GameInfo{}, err
 	}
 	return s.Game(), nil
-}
-
-// AutoConnect is on unless the player turned it off.
-func (s *Service) AutoConnect() bool {
-	on := s.cfg.Get().AutoConnect
-	return on == nil || *on
-}
-
-func (s *Service) SetAutoConnect(on bool) error {
-	return s.cfg.Update(func(c *config.Config) error { c.AutoConnect = &on; return nil })
 }
 
 func (s *Service) Servers() []config.Server { return s.cfg.Get().Servers }
@@ -328,13 +317,10 @@ type Phase struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// PlayRequest logs in with a saved account (AccountID) or a login typed for this launch.
+// PlayRequest joins with an account saved in the game with "Remember password" ticked.
 type PlayRequest struct {
-	AccountID      int64  `json:"accountId"`
-	Username       string `json:"username"`
-	Password       string `json:"password"`
-	ServerPassword string `json:"serverPassword"`
-	TakeOver       bool   `json:"takeOver"`
+	AccountID int64 `json:"accountId"`
+	TakeOver  bool  `json:"takeOver"`
 }
 
 func (s *Service) Play(ctx context.Context, id string, req PlayRequest) error {
@@ -433,30 +419,24 @@ func (s *Service) autoConnect(ctx context.Context, srv config.Server, req *PlayR
 			ac.ServerPassword = found.ServerPassword
 		}
 	}
-	if req.ServerPassword != "" {
-		ac.ServerPassword = req.ServerPassword
+	if req.AccountID == 0 {
+		return ac, errNoSavedLogin
 	}
-	switch {
-	case req.AccountID > 0:
-		if saved == nil {
-			return ac, errors.New("this account is no longer saved in the game")
-		}
+	if saved != nil {
 		for _, a := range saved.Accounts {
 			if a.ID == req.AccountID {
-				if !a.CanAutoLogin() {
+				if !a.AutoLogin {
 					return ac, errors.New("this account's password is not saved in the game")
 				}
 				ac.User, ac.PasswordHash = a.Username, a.PasswordHash
 				return ac, nil
 			}
 		}
-		return ac, errors.New("this account is no longer saved in the game")
-	case strings.TrimSpace(req.Username) != "" && req.Password != "":
-		ac.User, ac.PasswordHash = strings.TrimSpace(req.Username), pzhash.Hash(req.Password)
-		return ac, nil
 	}
-	return ac, errors.New("enter a username and password")
+	return ac, errors.New("this account is no longer saved in the game")
 }
+
+var errNoSavedLogin = errors.New("add your account for this server in the game with “Remember password” ticked")
 
 func (s *Service) waitAvailable(ctx context.Context, srv config.Server, data *publicapi.PublicData, phase func(string, string)) error {
 	for data.Status != "available" {

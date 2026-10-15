@@ -75,28 +75,16 @@ export class Phase {
 }
 
 /**
- * PlayRequest logs in with a saved account (AccountID) or a login typed for this launch.
+ * PlayRequest joins with an account saved in the game with "Remember password" ticked.
  */
 export class PlayRequest {
     "accountId": number;
-    "username": string;
-    "password": string;
-    "serverPassword": string;
     "takeOver": boolean;
 
     /** Creates a new PlayRequest instance. */
     constructor($$source: Partial<PlayRequest> = {}) {
         if (!("accountId" in $$source)) {
             this["accountId"] = 0;
-        }
-        if (!("username" in $$source)) {
-            this["username"] = "";
-        }
-        if (!("password" in $$source)) {
-            this["password"] = "";
-        }
-        if (!("serverPassword" in $$source)) {
-            this["serverPassword"] = "";
         }
         if (!("takeOver" in $$source)) {
             this["takeOver"] = false;

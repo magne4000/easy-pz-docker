@@ -111,9 +111,12 @@ behind the proxy shares the proxy's address, and these 4 downloads.
 `~/Zomboid/mods` in sync and starts the game straight into the server with
 `-nosteam`. When a mod it already has is updated, it downloads only the files
 that changed (the whole mod when most of it did). A Steam copy of the game
-works too: it is found in the Steam libraries and started the same way. Turn
-off *Join automatically* on the main screen to only sync the mods and start the
-game, then join from the game's menu. Set `PANEL_PUBLIC_URL` (or
+works too: it is found in the Steam libraries and started the same way. To join
+a server, the launcher uses the account the game remembers for it: add the
+server and your account once in the game's *Multiplayer* menu with *Remember
+password* ticked (the launcher shows the steps), and *Join* connects from then
+on. Until then, *Play* syncs the mods and starts the game, and you join from the
+game's menu. Set `PANEL_PUBLIC_URL` (or
 `PANEL_PUBLIC_GAME_ADDRESS`) so it knows where to connect. Builds are on the
 releases page; the mod page links the release of the image's version (release
 images only, not local builds). The launcher never looks for updates on its

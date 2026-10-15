@@ -27,7 +27,6 @@ import (
 	"github.com/magne4000/easy-pz-docker/launcher/helpermod"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/config"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/game"
-	"github.com/magne4000/easy-pz-docker/launcher/internal/pzhash"
 	"github.com/magne4000/easy-pz-docker/launcher/internal/zomboid"
 )
 
@@ -175,27 +174,37 @@ func TestAddServerAndStatus(t *testing.T) {
 	require.Equal(t, 1, st.Plan.UpToDate)
 }
 
-func TestPlayWithTypedPassword(t *testing.T) {
+func TestPlayWithSavedAccount(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	srv, err := h.svc.AddServerURL(ctx, h.page())
 	require.NoError(t, err)
 
-	require.ErrorContains(t, h.svc.Play(ctx, srv.ID, PlayRequest{}), "username and password")
+	require.ErrorIs(t, h.svc.Play(ctx, srv.ID, PlayRequest{}), errNoSavedLogin)
+	require.ErrorContains(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: 1}), "no longer saved")
 	require.Zero(t, h.started)
 
-	require.NoError(t, h.svc.Play(ctx, srv.ID, PlayRequest{Username: " alice ", Password: "secret", ServerPassword: "srvpw"}))
+	accID := saveAccount(t, h.user, "pz.example.com", 16261, "bob", "$2a$12$storedhash")
+	st, err := h.svc.Status(ctx, srv.ID)
+	require.NoError(t, err)
+	require.NotNil(t, st.Saved)
+	require.Equal(t, "bob", st.Saved.Accounts[0].Username)
+	require.True(t, st.Saved.Accounts[0].AutoLogin)
+
+	require.ErrorContains(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID + 1}), "no longer saved")
+	require.NoError(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID}))
 	require.Equal(t, 1, h.started)
 	require.Equal(t, []string{PhaseSyncing, PhaseLaunching, PhaseLaunched}, h.ev.phases())
 	ini := readIni(t, h.user)
-	require.Contains(t, ini, "host=pz.example.com\nport=16261\nuser=alice\npassword="+pzhash.Hash("secret")+"\ndoHash=false\n")
-	require.Contains(t, ini, "serverPassword=srvpw\n")
-	require.NotContains(t, ini, "secret\n", "no plain-text password on disk")
+	require.Contains(t, ini, "host=pz.example.com\nport=16261\nuser=bob\npassword=$2a$12$storedhash\ndoHash=false\n")
+	require.Contains(t, ini, "serverPassword=savedsrvpw\n")
 	require.DirExists(t, filepath.Join(h.user.Mods(), "ModA"))
 	require.DirExists(t, filepath.Join(h.user.Mods(), helpermod.ID))
 	active, err := os.ReadFile(filepath.Join(h.user.Mods(), "default.txt"))
 	require.NoError(t, err)
 	require.Contains(t, string(active), "mod = "+helpermod.ID+",")
+	got, _ := h.svc.server(srv.ID)
+	require.Equal(t, "bob", got.Account, "remembered as the default account")
 
 	// Nobody consumes the file: it is removed after ConsumeTimeout.
 	require.Eventually(t, func() bool {
@@ -204,25 +213,17 @@ func TestPlayWithTypedPassword(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond)
 }
 
-func TestPlayWithSavedAccount(t *testing.T) {
+func TestPlayRefusesUnsavedPassword(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	accID := saveAccount(t, h.user, "pz.example.com", 16261, "bob", "$2a$12$storedhash")
+	accID := saveAccount(t, h.user, "pz.example.com", 16261, "bob", "")
 	srv, err := h.svc.AddServerURL(ctx, h.page())
 	require.NoError(t, err)
-
 	st, err := h.svc.Status(ctx, srv.ID)
 	require.NoError(t, err)
-	require.NotNil(t, st.Saved)
-	require.Equal(t, "bob", st.Saved.Accounts[0].Username)
-
-	require.ErrorContains(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID + 1}), "no longer saved")
-	require.NoError(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID}))
-	ini := readIni(t, h.user)
-	require.Contains(t, ini, "user=bob\npassword=$2a$12$storedhash\n")
-	require.Contains(t, ini, "serverPassword=savedsrvpw\n")
-	got, _ := h.svc.server(srv.ID)
-	require.Equal(t, "bob", got.Account, "remembered as the default account")
+	require.False(t, st.Saved.Accounts[0].AutoLogin)
+	require.ErrorContains(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID}), "password is not saved")
+	require.Zero(t, h.started)
 }
 
 func TestPlayWaitsForServer(t *testing.T) {
@@ -233,7 +234,8 @@ func TestPlayWaitsForServer(t *testing.T) {
 	h.srv.mu.Lock()
 	h.srv.status = []string{"restarting", "restarting", "restarting", "available"}
 	h.srv.mu.Unlock()
-	require.NoError(t, h.svc.Play(ctx, srv.ID, PlayRequest{Username: "a", Password: "b"}))
+	accID := saveAccount(t, h.user, "pz.example.com", 16261, "bob", "$2a$12$storedhash")
+	require.NoError(t, h.svc.Play(ctx, srv.ID, PlayRequest{AccountID: accID}))
 	require.Equal(t, []string{PhaseSyncing, PhaseWaiting, PhaseLaunching, PhaseLaunched}, h.ev.phases())
 
 	h.srv.mu.Lock()
@@ -241,7 +243,7 @@ func TestPlayWaitsForServer(t *testing.T) {
 	h.srv.mu.Unlock()
 	cctx, cancel := context.WithTimeout(ctx, 30*time.Millisecond)
 	defer cancel()
-	require.ErrorIs(t, h.svc.Play(cctx, srv.ID, PlayRequest{Username: "a", Password: "b"}), context.DeadlineExceeded)
+	require.ErrorIs(t, h.svc.Play(cctx, srv.ID, PlayRequest{AccountID: accID}), context.DeadlineExceeded)
 	require.Equal(t, 1, h.started, "cancelled before launch")
 }
 
@@ -255,20 +257,6 @@ func TestStartGameClearsLeftoverFile(t *testing.T) {
 	require.Equal(t, 1, h.started)
 	_, err = os.Stat(h.user.AutoConnectFile())
 	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestAutoConnectDefaultsOnAndPersists(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "config.json")
-	// Saved before the setting existed.
-	require.NoError(t, os.WriteFile(path, []byte(`{"servers":[]}`), 0o644))
-	open := func() *Service {
-		store, err := config.Open(path)
-		require.NoError(t, err)
-		return New("test", store, zomboid.Dir(t.TempDir()), &events{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	}
-	require.True(t, open().AutoConnect())
-	require.NoError(t, open().SetAutoConnect(false))
-	require.False(t, open().AutoConnect(), "off survives a restart")
 }
 
 func TestForeignModsNeedTakeOver(t *testing.T) {

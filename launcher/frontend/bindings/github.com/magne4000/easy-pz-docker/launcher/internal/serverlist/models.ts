@@ -16,6 +16,11 @@ export class Account {
     "authType": number;
     "lastLogon": string;
 
+    /**
+     * AutoLogin: the launcher can join with it ("Remember password" ticked, password authentication).
+     */
+    "autoLogin": boolean;
+
     /** Creates a new Account instance. */
     constructor($$source: Partial<Account> = {}) {
         if (!("id" in $$source)) {
@@ -32,6 +37,9 @@ export class Account {
         }
         if (!("lastLogon" in $$source)) {
             this["lastLogon"] = "";
+        }
+        if (!("autoLogin" in $$source)) {
+            this["autoLogin"] = false;
         }
 
         Object.assign(this, $$source);

@@ -22,10 +22,8 @@ type Account struct {
 	// AuthType 1 is password only; others need a second factor.
 	AuthType  int    `json:"authType"`
 	LastLogon string `json:"lastLogon"`
-}
-
-func (a Account) CanAutoLogin() bool {
-	return a.AuthType == 1 && a.SavePassword && a.PasswordHash != ""
+	// AutoLogin: the launcher can join with it ("Remember password" ticked, password authentication).
+	AutoLogin bool `json:"autoLogin"`
 }
 
 type Server struct {
@@ -89,6 +87,7 @@ func Read(ctx context.Context, path string) ([]Server, error) {
 		if err := arows.Scan(&a.ID, &serverID, &a.Username, &a.PasswordHash, &a.SavePassword, &a.AuthType, &a.LastLogon); err != nil {
 			return nil, fmt.Errorf("read accounts: %w", err)
 		}
+		a.AutoLogin = a.AuthType == 1 && a.SavePassword && a.PasswordHash != ""
 		if i, ok := byID[serverID]; ok {
 			servers[i].Accounts = append(servers[i].Accounts, a)
 		}
