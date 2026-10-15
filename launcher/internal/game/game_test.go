@@ -30,12 +30,14 @@ func TestOpenPerOS(t *testing.T) {
 	touch(t, nested, "projectzomboid.sh")
 	touch(t, nested, "projectzomboid", "projectzomboid.jar")
 	touch(t, nested, "projectzomboid", "ProjectZomboid64")
+	touch(t, nested, "projectzomboid", "natives", "libsteam_api.so")
 	for _, pick := range []string{nested, filepath.Join(nested, "projectzomboid")} {
 		in, err = open(pick, "linux")
 		require.NoError(t, err, pick)
 		require.Equal(t, nested, in.Dir)
 		require.Equal(t, filepath.Join(nested, "projectzomboid", "projectzomboid.jar"), in.Jar())
 		require.Equal(t, []string{filepath.Join(nested, "projectzomboid.sh"), "-nosteam"}, in.Command().Args)
+		require.Equal(t, filepath.Join(nested, "projectzomboid", "natives", "libsteam_api.so"), in.steamAPI())
 	}
 
 	win := t.TempDir()
@@ -48,9 +50,11 @@ func TestOpenPerOS(t *testing.T) {
 	mac := t.TempDir()
 	touch(t, mac, macBundle, "Contents", "Info.plist")
 	touch(t, mac, macBundle, "Contents", "Java", "projectzomboid.jar")
+	touch(t, mac, macBundle, "Contents", "MacOS", "libsteam_api.dylib")
 	in, err = open(mac, "darwin")
 	require.NoError(t, err)
-	require.Equal(t, []string{"open", filepath.Join(mac, macBundle), "--args", "-nosteam"}, in.Command().Args)
+	require.Equal(t, []string{"open", "-W", filepath.Join(mac, macBundle), "--args", "-nosteam"}, in.Command().Args)
+	require.Equal(t, filepath.Join(mac, macBundle, "Contents", "MacOS", "libsteam_api.dylib"), in.steamAPI())
 
 	_, err = open(lin, "windows")
 	require.ErrorIs(t, err, ErrInvalid)

@@ -118,11 +118,9 @@ password* ticked (the launcher shows the steps), and *Join* connects from then
 on. Until then, *Play* syncs the mods and starts the game, and you join from the
 game's menu. Set `PANEL_PUBLIC_URL` (or
 `PANEL_PUBLIC_GAME_ADDRESS`) so it knows where to connect. Builds are on the
-releases page; the mod page links the release of the image's version (release
-images only, not local builds). The launcher never looks for updates on its
-own: *Settings → Check for updates* finds a newer release and installs it on
-request. Pull requests that touch the launcher get test builds, linked from a
-bot comment.
+releases page; the mod page links the release of the image's version. The
+launcher never looks for updates on its own: *Settings → Check for updates*
+finds a newer release and installs it on request.
 
 ## Developing
 
