@@ -51,6 +51,7 @@ function parseWorkshopIds(text: string): string[] {
 }
 
 const workshopUrl = (id: string) => `https://steamcommunity.com/sharedfiles/filedetails/?id=${id}`;
+const changelogUrl = (id: string) => `https://steamcommunity.com/sharedfiles/filedetails/changelog/${id}`;
 
 // Task kinds that download Workshop items: additions and imports, and the update window.
 const downloadKinds: Record<string, true> = { workshop: true, "game-update": true };
@@ -247,7 +248,17 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
             <ExternalLink className="text-muted-foreground size-3.5" />
             {!item.installed && <Badge variant="outline">{t("not downloaded")}</Badge>}
             {item.installed && item.updateAvailable && (
-              <Badge className="bg-warning/15 text-warning">{t("update available")}</Badge>
+              <Badge asChild className="bg-warning/15 text-warning [a&]:hover:bg-warning/25">
+                <a
+                  href={changelogUrl(item.workshopId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  title={t("Open the change notes on Steam")}
+                >
+                  {t("update available")}
+                  <ExternalLink />
+                </a>
+              </Badge>
             )}
           </CardTitle>
           <CardDescription className="mt-1 font-mono text-xs">
