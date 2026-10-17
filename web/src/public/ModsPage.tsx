@@ -284,7 +284,11 @@ export function ModsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>{t("{{count}} Workshop items", { count: data.items.length })}</CardTitle>
+          <CardTitle>
+            {data.items.some((it) => !it.url)
+              ? t("{{count}} items", { count: data.items.length })
+              : t("{{count}} Workshop items", { count: data.items.length })}
+          </CardTitle>
           {data.collection && (
             <CardDescription>
               <a
@@ -308,8 +312,14 @@ export function ModsPage() {
               </summary>
               <div className="mt-3 space-y-2 pl-7 text-sm">
                 <p className="text-muted-foreground text-xs">
-                  {t("Workshop id")} <span className="font-mono">{it.workshopId}</span> · {t("version of")}{" "}
-                  {formatDate(it.timeUpdated)}
+                  {it.url ? (
+                    <>
+                      {t("Workshop id")} <span className="font-mono">{it.workshopId}</span>
+                    </>
+                  ) : (
+                    t("Not on the Workshop: download them here")
+                  )}{" "}
+                  · {t("version of")} {formatDate(it.timeUpdated)}
                 </p>
                 <div className="flex flex-wrap gap-1">
                   {it.mods.map((m) => (
@@ -330,11 +340,13 @@ export function ModsPage() {
                       <Loader2 className="animate-spin" /> {t("Preparing…")}
                     </Button>
                   )}
-                  <Button asChild size="sm" variant="ghost">
-                    <a href={it.url} target="_blank" rel="noreferrer noopener">
-                      <ExternalLink /> {t("Workshop page")}
-                    </a>
-                  </Button>
+                  {it.url && (
+                    <Button asChild size="sm" variant="ghost">
+                      <a href={it.url} target="_blank" rel="noreferrer noopener">
+                        <ExternalLink /> {t("Workshop page")}
+                      </a>
+                    </Button>
+                  )}
                 </div>
               </div>
             </details>

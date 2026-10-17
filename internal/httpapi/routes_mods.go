@@ -29,10 +29,14 @@ type WorkshopIDInput struct {
 
 type ToggleModInput struct {
 	Body struct {
-		WorkshopID string `json:"workshopId" pattern:"^[0-9]+$"`
+		WorkshopID string `json:"workshopId" pattern:"^[0-9]*$" doc:"empty for a local mod"`
 		ModID      string `json:"modId" minLength:"1"`
 		Enabled    bool   `json:"enabled"`
 	}
+}
+
+type LocalFolderInput struct {
+	Folder string `path:"folder" minLength:"1" doc:"the folder in the server's mods folder"`
 }
 
 type OrderInput struct {
@@ -63,7 +67,7 @@ type ConflictsOutput struct {
 type LinkResultOutput struct{ Body mods.LinkResult }
 
 func registerMods(api huma.API, d Deps) {
-	huma.Register(api, op("list-mods", http.MethodGet, "/mods", "mods", "Tracked workshop items, load order and maps"),
+	huma.Register(api, op("list-mods", http.MethodGet, "/mods", "mods", "Tracked workshop items, local mods, load order and maps"),
 		func(ctx context.Context, _ *struct{}) (*ModsOutput, error) {
 			ov, err := d.Mods.Overview(ctx)
 			if err != nil {
@@ -84,6 +88,10 @@ func registerMods(api huma.API, d Deps) {
 	huma.Register(api, op204("remove-mod", http.MethodDelete, "/mods/{workshopId}", "mods", "Untrack an item, unlink it and delete its download", 404),
 		func(ctx context.Context, in *WorkshopIDInput) (*struct{}, error) {
 			return nil, mapErr(d.Mods.Remove(ctx, in.WorkshopID))
+		})
+	huma.Register(api, op204("remove-local-mod", http.MethodDelete, "/mods/local/{folder}", "mods", "Delete a mod folder copied into the server's mods folder by hand", 404),
+		func(ctx context.Context, in *LocalFolderInput) (*struct{}, error) {
+			return nil, mapErr(d.Mods.RemoveLocal(ctx, in.Folder))
 		})
 	huma.Register(api, op204("toggle-mod", http.MethodPost, "/mods/toggle", "mods", "Enable or disable one mod id", 404),
 		func(ctx context.Context, in *ToggleModInput) (*struct{}, error) {
@@ -138,4 +146,5 @@ func registerMods(api huma.API, d Deps) {
 			}
 			return &LinkResultOutput{Body: res}, nil
 		})
+	registerUpload(api, d)
 }

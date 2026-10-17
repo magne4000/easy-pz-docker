@@ -168,7 +168,7 @@ func parseRange(spec string, size int64) (start, length int64, ok bool) {
 	return s, end - s + 1, true
 }
 
-// publicPack resolves "all" or a workshop id to its pack.
+// publicPack resolves "all" or a public item id to its pack.
 func publicPack(ctx context.Context, d Deps, log *slog.Logger, name string) (mods.Pack, bool, error) {
 	enabled, installed, err := d.Mods.Enabled(ctx)
 	if err != nil {
@@ -177,7 +177,7 @@ func publicPack(ctx context.Context, d Deps, log *slog.Logger, name string) (mod
 	ps := newPublicSet(enabled, installed)
 	ms := ps.all
 	if name != "all" {
-		if !wsidPath.MatchString(name) {
+		if !publicItemPath.MatchString(name) {
 			return mods.Pack{}, false, fiber.ErrNotFound
 		}
 		ms = ps.byItem[name]
@@ -185,7 +185,7 @@ func publicPack(ctx context.Context, d Deps, log *slog.Logger, name string) (mod
 	if len(ms) == 0 {
 		return mods.Pack{}, false, fiber.ErrNotFound
 	}
-	p, ready, err := d.Packer.Get(mods.PackKey(ms, ps.updated), ms)
+	p, ready, err := d.Packer.Get(ps.key(ms), ms)
 	if err != nil {
 		log.Error("public mod pack", "err", err)
 		return mods.Pack{}, false, fiber.NewError(http.StatusInternalServerError, "building the archive failed; retry in a minute")
@@ -284,7 +284,7 @@ func registerDownloads(g fiber.Router, d Deps, log *slog.Logger, rate fiber.Hand
 		return sendFile(c, p.Path, etag(p), "application/zip")
 	})
 	g.Get("/files/:id", rate, sl.acquire, func(c fiber.Ctx) error {
-		if !wsidPath.MatchString(c.Params("id")) {
+		if !publicItemPath.MatchString(c.Params("id")) {
 			return fiber.ErrNotFound
 		}
 		p, ready, err := publicPack(c.Context(), d, log, c.Params("id"))
@@ -298,7 +298,7 @@ func registerDownloads(g fiber.Router, d Deps, log *slog.Logger, rate fiber.Hand
 		return sendFile(c, p.Files, etag(p), fiber.MIMEApplicationJSON)
 	})
 	g.Post("/files/:id", rate, sl.acquire, func(c fiber.Ctx) error {
-		if !wsidPath.MatchString(c.Params("id")) {
+		if !publicItemPath.MatchString(c.Params("id")) {
 			return fiber.ErrNotFound
 		}
 		var req publicapi.FilesRequest

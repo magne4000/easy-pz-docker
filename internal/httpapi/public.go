@@ -29,32 +29,64 @@ var statusMessages = map[string]string{
 	"unavailable": "The server is currently offline.",
 }
 
-var wsidPath = regexp.MustCompile(`^[0-9]{1,20}$`)
+// publicItemPath matches a public item id: a workshop id, or localItem.
+var publicItemPath = regexp.MustCompile(`^([0-9]{1,20}|local)$`)
+
+// localItem is the public item of the mods copied into the server's mods
+// folder by hand.
+const localItem = "local"
 
 func workshopURL(id string) string {
 	return "https://steamcommunity.com/sharedfiles/filedetails/?id=" + id
 }
 
-// publicSet groups the enabled mods by workshop item, in load order.
+// publicSet groups the enabled mods by public item, in load order.
 type publicSet struct {
 	all     []mods.ModInfo
 	byItem  map[string][]mods.ModInfo
 	order   []string
-	updated map[string]time.Time
+	updated map[string]time.Time      // by Workshop item
+	local   map[string]mods.LocalStat // by local mod folder, read on first use
 }
 
 func newPublicSet(ms []mods.ModInfo, installed map[string]steam.WorkshopItemState) publicSet {
-	ps := publicSet{all: ms, byItem: map[string][]mods.ModInfo{}, updated: map[string]time.Time{}}
-	for _, m := range ms {
-		if _, ok := ps.byItem[m.WorkshopID]; !ok {
-			ps.order = append(ps.order, m.WorkshopID)
-		}
-		ps.byItem[m.WorkshopID] = append(ps.byItem[m.WorkshopID], m)
-	}
+	ps := publicSet{all: ms, byItem: map[string][]mods.ModInfo{}, updated: map[string]time.Time{}, local: map[string]mods.LocalStat{}}
 	for id, st := range installed {
 		ps.updated[id] = st.TimeUpdated
 	}
+	for _, m := range ms {
+		id := m.WorkshopID
+		if id == "" {
+			id = localItem
+		}
+		if _, ok := ps.byItem[id]; !ok {
+			ps.order = append(ps.order, id)
+		}
+		ps.byItem[id] = append(ps.byItem[id], m)
+	}
 	return ps
+}
+
+// localStat walks a local mod's files once per set, and only for requests
+// that involve local mods. On error the pack build reports the folder.
+func (ps publicSet) localStat(m mods.ModInfo) mods.LocalStat {
+	st, ok := ps.local[m.FolderName]
+	if !ok {
+		st, _ = mods.StatLocal(m.Dir)
+		ps.local[m.FolderName] = st
+	}
+	return st
+}
+
+// key is the pack key of ms: Workshop mods are versioned by their item's
+// download, local mods by their files.
+func (ps publicSet) key(ms []mods.ModInfo) string {
+	return mods.PackKey(ms, func(m mods.ModInfo) string {
+		if m.WorkshopID == "" {
+			return ps.localStat(m).Version
+		}
+		return strconv.FormatInt(ps.updated[m.WorkshopID].Unix(), 10)
+	})
 }
 
 // publicConnect: an explicit game port wins; otherwise the ini's DefaultPort,
@@ -181,24 +213,36 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		titles := map[string]string{}
 		sizes := map[string]int64{}
 		for _, it := range ov.Items {
-			titles[it.WorkshopID], sizes[it.WorkshopID] = it.Title, it.Size
+			if !it.Local {
+				titles[it.WorkshopID], sizes[it.WorkshopID] = it.Title, it.Size
+			}
 		}
 		out.ModsLine = strings.Join(ov.LoadOrder, ";")
 		out.MapLine = strings.Join(ov.Maps, ";")
 		keep := []string{}
 		for _, id := range ps.order {
 			ms := ps.byItem[id]
-			key := mods.PackKey(ms, ps.updated)
+			key := ps.key(ms)
 			keep = append(keep, key)
 			it := publicapi.PublicItem{WorkshopID: id, Title: titles[id], URL: workshopURL(id), Size: sizes[id], TimeUpdated: ps.updated[id], Mods: []publicapi.PublicMod{},
 				Download: packInfo(d, key, ms, base+"download/"+id+".zip"), Files: base + "files/" + id}
+			if id == localItem {
+				it.Title, it.URL = "Mods not on the Workshop", ""
+				for _, m := range ms {
+					st := ps.localStat(m)
+					it.Size += st.Size
+					if st.Newest.After(it.TimeUpdated) {
+						it.TimeUpdated = st.Newest
+					}
+				}
+			}
 			for _, m := range ms {
 				it.Mods = append(it.Mods, publicapi.PublicMod{ID: m.ID, Name: m.Name, Folder: m.FolderName})
 			}
 			out.Items = append(out.Items, it)
 		}
 		if len(ps.all) > 0 {
-			key := mods.PackKey(ps.all, ps.updated)
+			key := ps.key(ps.all)
 			keep = append(keep, key)
 			out.Pack = packInfo(d, key, ps.all, base+"download/all.zip")
 		}

@@ -45,13 +45,54 @@ func NewPacker(cacheDir string, log *slog.Logger) *Packer {
 	return &Packer{dir: cacheDir, log: log, failed: map[string]error{}}
 }
 
-// PackKey identifies a mod set: folder names plus each item's version.
-func PackKey(ms []ModInfo, updated map[string]time.Time) string {
+// PackKey identifies a mod set: folder names plus each mod's version.
+func PackKey(ms []ModInfo, version func(ModInfo) string) string {
 	h := sha256.New()
 	for _, m := range ms {
-		fmt.Fprintf(h, "%s\x00%s\x00%d\n", m.WorkshopID, m.FolderName, updated[m.WorkshopID].Unix())
+		fmt.Fprintf(h, "%s\x00%s\x00%s\n", m.WorkshopID, m.FolderName, version(m))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:24]
+}
+
+// LocalStat describes a local mod's files, which change without pzman being
+// told.
+type LocalStat struct {
+	Version string    // fingerprint of every file's path, size and mtime
+	Newest  time.Time // latest file or directory change
+	Size    int64
+}
+
+func StatLocal(dir string) (LocalStat, error) {
+	var st LocalStat
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return st, err
+	}
+	h := sha256.New()
+	err = filepath.WalkDir(real, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		if info.ModTime().After(st.Newest) {
+			st.Newest = info.ModTime()
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(real, p)
+		if err != nil {
+			return err
+		}
+		st.Size += info.Size()
+		fmt.Fprintf(h, "%s\x00%d\x00%d\n", filepath.ToSlash(rel), info.Size(), info.ModTime().UnixNano())
+		return nil
+	})
+	st.Version = hex.EncodeToString(h.Sum(nil))
+	return st, err
 }
 
 func (p *Packer) paths(key string) (zipPath, sumPath, filesPath string) {

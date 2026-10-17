@@ -251,7 +251,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Tracked workshop items, load order and maps */
+        /** Tracked workshop items, local mods, load order and maps */
         get: operations["list-mods"];
         put?: never;
         /** Track workshop items and download them */
@@ -342,6 +342,43 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mods/local": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload a mod folder into the server's mods folder
+         * @description multipart/form-data, streamed to disk: for each file a `path` field (slash-separated, starting with the mod folder) then a `file` field with its content.
+         */
+        post: operations["upload-local-mod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/mods/local/{folder}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete a mod folder copied into the server's mods folder by hand */
+        delete: operations["remove-local-mod"];
         options?: never;
         head?: never;
         patch?: never;
@@ -964,9 +1001,13 @@ export interface components {
             /** Format: date-time */
             checkedAt?: string;
             error?: string;
+            /** @description the local mod's folder in the mods folder */
+            folder?: string;
             installed: boolean;
             /** Format: date-time */
             installedUpdated?: string;
+            /** @description a mod folder copied into the server's mods folder by hand */
+            local: boolean;
             mods: components["schemas"]["ModView"][] | null;
             previewUrl: string;
             /** Format: date-time */
@@ -975,6 +1016,7 @@ export interface components {
             size: number;
             title: string;
             updateAvailable: boolean;
+            /** @description empty for a local mod */
             workshopId: string;
         };
         LifecycleInputBody: {
@@ -1063,6 +1105,8 @@ export interface components {
             missing: string[] | null;
             modId: string;
             name: string;
+            /** @description another copy of this mod id loads instead: the local copy without Steam, the Workshop copy with Steam */
+            overridden: boolean;
             requires: string[] | null;
         };
         ModsChanged: Record<string, never>;
@@ -1187,7 +1231,9 @@ export interface components {
             /** Format: date-time */
             timeUpdated?: string;
             title: string;
+            /** @description Workshop page; empty for the local item */
             url: string;
+            /** @description The Workshop item, or "local" for the mods copied into the server's mods folder by hand */
             workshopId: string;
         };
         PublicLauncher: {
@@ -1536,6 +1582,7 @@ export interface components {
             readonly $schema?: string;
             enabled: boolean;
             modId: string;
+            /** @description empty for a local mod */
             workshopId: string;
         };
         UpdateWindow: {
@@ -1562,6 +1609,16 @@ export interface components {
             /** Format: date-time */
             nextCheckAt?: string;
             window: components["schemas"]["Window"];
+        };
+        UploadLocalOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/UploadLocalOutputBody.json
+             */
+            readonly $schema?: string;
+            /** @description the installed folder in the mods folder */
+            folder: string;
         };
         Volume: {
             error?: string;
@@ -2710,6 +2767,117 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "upload-local-mod": {
+        parameters: {
+            query?: {
+                /** @description replace the local mod with the same folder; refused while the server runs */
+                replace?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": unknown;
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UploadLocalOutputBody"];
+                };
+            };
+            /** @description Conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Request Entity Too Large */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "remove-local-mod": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description the folder in the server's mods folder */
+                folder: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No Content */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not Found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

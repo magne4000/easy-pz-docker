@@ -131,8 +131,9 @@ function ManifestDialog({ id, onClose }: { id: number | null; onClose: () => voi
               ) : (
                 <ul className="space-y-1 font-mono text-xs">
                   {m.mods?.map((r) => (
-                    <li key={r.workshopId}>
-                      {r.workshopId} · {r.modIds?.join(", ")} · {formatDate(r.timeUpdated)}
+                    <li key={r.workshopId || "local"}>
+                      {r.workshopId || t("mods folder")} · {r.modIds?.join(", ")}
+                      {r.workshopId && ` · ${formatDate(r.timeUpdated)}`}
                     </li>
                   ))}
                 </ul>
