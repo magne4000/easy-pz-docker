@@ -68,15 +68,21 @@ func NewAPI(version string, fcfg fiber.Config) (*fiber.App, fiber.Router, huma.A
 
 func New(cfg app.Config, log *slog.Logger, deps Deps) (*Server, error) {
 	a, g, api := NewAPI(deps.Version, fiber.Config{
-		ReadTimeout:  15 * time.Second,
-		ErrorHandler: problemErrorHandler(log),
-		TrustProxy:   true,
+		ReadTimeout: 15 * time.Second,
+		// Bodies over the (default) BodyLimit reach the router as streams:
+		// limitBody rejects them everywhere but the mod upload. Pre-parsing
+		// would spool any multipart body to disk before routing.
+		StreamRequestBody:            true,
+		DisablePreParseMultipartForm: true,
+		ErrorHandler:                 problemErrorHandler(log),
+		TrustProxy:                   true,
 		TrustProxyConfig: fiber.TrustProxyConfig{
 			Proxies:  cfg.TrustedProxies,
 			Loopback: true,
 		},
 		ProxyHeader: fiber.HeaderXForwardedFor,
 	})
+	a.Use(limitBody(fiber.DefaultBodyLimit))
 	s := &Server{cfg: cfg, log: log, app: a}
 	auth, err := newAuth(cfg, log)
 	if err != nil {

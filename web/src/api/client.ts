@@ -72,3 +72,39 @@ export async function unwrap<T>(p: Promise<{ data?: T; error?: unknown; response
   if (!response.ok) throw new ApiError(response.status, error as Schemas["ErrorModel"] | undefined);
   return data as T;
 }
+
+type XhrResult = { status: number; response: unknown };
+
+// send POSTs once with XMLHttpRequest, the browser API that reports upload
+// progress (fetch does not).
+function send(path: string, body: FormData, onProgress?: (loaded: number, total: number) => void) {
+  const { promise, resolve, reject } = Promise.withResolvers<XhrResult>();
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", `/api${path}`);
+  const token = csrfToken();
+  if (token) xhr.setRequestHeader(CSRF_HEADER, token);
+  xhr.responseType = "json";
+  xhr.upload.onprogress = (e) => onProgress?.(e.loaded, e.total);
+  xhr.onload = () => resolve({ status: xhr.status, response: xhr.response });
+  xhr.onerror = () => reject(new Error("the upload was interrupted"));
+  xhr.send(body);
+  return promise;
+}
+
+// upload POSTs a multipart body; like csrfFetch, it fetches a fresh CSRF
+// token and retries once when the server lost the old one.
+export async function upload<T>(
+  path: string,
+  body: FormData,
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<T> {
+  if (!csrfToken()) await fetch("/api/auth/session", { credentials: "same-origin" });
+  let res = await send(path, body, onProgress);
+  if (res.status === 403 && (res.response as Schemas["ErrorModel"] | null)?.detail?.startsWith("CSRF")) {
+    await fetch("/api/auth/session", { credentials: "same-origin" });
+    res = await send(path, body, onProgress);
+  }
+  if (res.status >= 200 && res.status < 300) return res.response as T;
+  if (res.status === 401) for (const l of unauthorizedListeners) l();
+  throw new ApiError(res.status, (res.response ?? undefined) as Schemas["ErrorModel"] | undefined);
+}

@@ -89,9 +89,9 @@ type PublicMod struct {
 }
 
 type PublicItem struct {
-	WorkshopID  string      `json:"workshopId"`
+	WorkshopID  string      `json:"workshopId" doc:"The Workshop item, or \"local\" for the mods copied into the server's mods folder by hand"`
 	Title       string      `json:"title"`
-	URL         string      `json:"url"`
+	URL         string      `json:"url" doc:"Workshop page; empty for the local item"`
 	Size        int64       `json:"size"`
 	TimeUpdated time.Time   `json:"timeUpdated,omitzero"`
 	Mods        []PublicMod `json:"mods" nullable:"false"`

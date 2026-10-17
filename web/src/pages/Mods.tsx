@@ -3,6 +3,7 @@ import {
   ArrowDown,
   ArrowUp,
   ExternalLink,
+  FolderOpen,
   FolderSync,
   Layers,
   ListOrdered,
@@ -10,11 +11,12 @@ import {
   Plus,
   RefreshCw,
   Trash2,
+  Upload,
   Wand2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, type Schemas, unwrap } from "@/api/client";
+import { api, type Schemas, unwrap, upload } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useAction, useConflicts, useMods, useSettings, useTasks } from "@/api/queries";
 import { Confirm } from "@/components/Confirm";
@@ -36,6 +38,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -107,6 +110,114 @@ function AddDialog() {
             }
           >
             {t("Add")}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// UploadDialog sends a mod folder picked with the browser's folder picker;
+// each file's path starts with the folder's name.
+function UploadDialog({ localFolders }: { localFolders: string[] }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [files, setFiles] = useState<File[]>([]);
+  const [progress, setProgress] = useState<number | null>(null);
+  const folder = files[0]?.webkitRelativePath.split("/")[0] ?? "";
+  const size = files.reduce((n, f) => n + f.size, 0);
+  const replace = localFolders.includes(folder);
+  const send = useAction(
+    async () => {
+      const body = new FormData();
+      for (const f of files) {
+        body.append("path", f.webkitRelativePath);
+        body.append("file", f);
+      }
+      setProgress(0);
+      try {
+        return await upload<Schemas["UploadLocalOutputBody"]>(
+          `/mods/local${replace ? "?replace=true" : ""}`,
+          body,
+          (loaded, total) => setProgress(total ? (loaded / total) * 100 : 0),
+        );
+      } finally {
+        setProgress(null);
+      }
+    },
+    {
+      success: (r) =>
+        t("{{folder}} is in the mods folder; it loads at the next restart", { folder: r.folder }),
+      invalidate: [keys.mods],
+    },
+  );
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!send.isPending) {
+          setOpen(o);
+          setFiles([]);
+        }
+      }}
+    >
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Upload /> {t("Upload mod")}
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("Upload a mod folder")}</DialogTitle>
+          <DialogDescription>
+            {t(
+              "Pick the mod folder itself: the one holding common/ and/or 42/ with its mod.info. It is copied into the server's mods folder and loads at the next restart.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <Label className="flex cursor-pointer items-center gap-2 rounded-md border border-dashed p-4 text-sm">
+          <FolderOpen className="text-muted-foreground size-5" />
+          {folder ? (
+            <span className="font-mono text-xs">
+              {folder} · {t("{{count}} file(s)", { count: files.length })} · {formatBytes(size)}
+            </span>
+          ) : (
+            t("Choose a folder…")
+          )}
+          <input
+            type="file"
+            multiple
+            className="sr-only"
+            ref={(el) => el?.setAttribute("webkitdirectory", "")}
+            onChange={(e) => setFiles([...(e.target.files ?? [])])}
+            disabled={send.isPending}
+          />
+        </Label>
+        {replace && (
+          <Alert>
+            <AlertTriangle />
+            <AlertTitle>{t("Replaces {{folder}}", { folder })}</AlertTitle>
+            <AlertDescription>
+              {t(
+                "The mods folder already has a local mod with this name. Replacing it needs the server stopped.",
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+        {progress !== null && <Progress value={progress} />}
+        <DialogFooter>
+          <Button
+            disabled={!folder || send.isPending}
+            onClick={() =>
+              send.mutate(undefined, {
+                onSuccess: () => {
+                  setFiles([]);
+                  setOpen(false);
+                },
+              })
+            }
+          >
+            {replace ? t("Replace") : t("Upload")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -217,7 +328,10 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
     { invalidate: [keys.mods] },
   );
   const remove = useAction(
-    () => unwrap(api.DELETE("/mods/{workshopId}", { params: { path: { workshopId: item.workshopId } } })),
+    () =>
+      item.local
+        ? unwrap(api.DELETE("/mods/local/{folder}", { params: { path: { folder: item.folder ?? "" } } }))
+        : unwrap(api.DELETE("/mods/{workshopId}", { params: { path: { workshopId: item.workshopId } } })),
     { success: t("Removed"), invalidate: [keys.mods] },
   );
   return (
@@ -232,20 +346,33 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
           />
         ) : (
           <div className="bg-muted flex size-14 shrink-0 items-center justify-center rounded-md">
-            <Package className="text-muted-foreground size-6" />
+            {item.local ? (
+              <FolderOpen className="text-muted-foreground size-6" />
+            ) : (
+              <Package className="text-muted-foreground size-6" />
+            )}
           </div>
         )}
         <div className="min-w-0 flex-1">
           <CardTitle className="flex flex-wrap items-center gap-2 text-base">
-            <a
-              href={workshopUrl(item.workshopId)}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:underline"
-            >
-              {item.title}
-            </a>
-            <ExternalLink className="text-muted-foreground size-3.5" />
+            {item.local ? (
+              <>
+                {item.title}
+                <Badge variant="secondary">{t("mods folder")}</Badge>
+              </>
+            ) : (
+              <>
+                <a
+                  href={workshopUrl(item.workshopId)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="hover:underline"
+                >
+                  {item.title}
+                </a>
+                <ExternalLink className="text-muted-foreground size-3.5" />
+              </>
+            )}
             {!item.installed && <Badge variant="outline">{t("not downloaded")}</Badge>}
             {item.installed && item.updateAvailable && (
               <Badge asChild className="bg-warning/15 text-warning [a&]:hover:bg-warning/25">
@@ -262,9 +389,15 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
             )}
           </CardTitle>
           <CardDescription className="mt-1 font-mono text-xs">
-            {item.workshopId} · {formatBytes(item.size)} · {t("installed")}{" "}
-            {formatDate(item.installedUpdated)}
-            {item.remoteUpdated && ` · ${t("workshop")} ${formatDate(item.remoteUpdated)}`}
+            {item.local ? (
+              <>mods/{item.folder}</>
+            ) : (
+              <>
+                {item.workshopId} · {formatBytes(item.size)} · {t("installed")}{" "}
+                {formatDate(item.installedUpdated)}
+                {item.remoteUpdated && ` · ${t("workshop")} ${formatDate(item.remoteUpdated)}`}
+              </>
+            )}
           </CardDescription>
           {item.error && <p className="text-destructive mt-1 text-xs">{item.error}</p>}
         </div>
@@ -275,9 +408,15 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
             </Button>
           }
           title={t("Remove {{title}}?", { title: item.title })}
-          description={t(
-            "It is untracked, unlinked, removed from Mods= and its download is deleted. It stays loaded until the next restart.",
-          )}
+          description={
+            item.local
+              ? t(
+                  "Its folder is deleted from the server's mods folder, for good: backups do not include it. It is removed from Mods= and stays loaded until the next restart.",
+                )
+              : t(
+                  "It is untracked, unlinked, removed from Mods= and its download is deleted. It stays loaded until the next restart.",
+                )
+          }
           confirm={t("Remove")}
           destructive
           onConfirm={() => remove.mutate()}
@@ -297,6 +436,13 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
                   {m.name || m.modId}{" "}
                   <span className="text-muted-foreground font-mono text-xs">{m.modId}</span>
                 </p>
+                {m.overridden && (
+                  <p className="text-warning text-xs">
+                    {item.local
+                      ? t("Ignored: the Workshop copy of this mod loads in Steam mode")
+                      : t("Overridden by the copy in the mods folder")}
+                  </p>
+                )}
                 {(m.requires ?? []).length > 0 && (
                   <p className="text-muted-foreground text-xs">
                     {t("requires")} {m.requires?.join(", ")}
@@ -441,6 +587,9 @@ export default function Mods() {
             </Button>
             <ConflictsDialog />
             <CollectionDialog />
+            <UploadDialog
+              localFolders={(ov?.items ?? []).flatMap((i) => (i.local && i.folder ? [i.folder] : []))}
+            />
             <AddDialog />
           </>
         }
@@ -503,10 +652,12 @@ export default function Mods() {
           {mods.isPending ? (
             <Card className="h-40 animate-pulse" />
           ) : ov?.items && ov.items.length > 0 ? (
-            ov.items.map((it) => <ItemCard key={it.workshopId} item={it} />)
+            ov.items.map((it) => <ItemCard key={it.local ? `local/${it.folder}` : it.workshopId} item={it} />)
           ) : (
             <Empty icon={Package} title={t("No mods yet")}>
-              {t("Add Workshop items by id or link, or import a collection.")}
+              {t(
+                "Add Workshop items by id or link, import a collection, or copy mod folders into the server's mods folder.",
+              )}
             </Empty>
           )}
         </div>

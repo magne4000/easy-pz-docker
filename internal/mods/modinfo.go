@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -186,26 +187,78 @@ func ScanWorkshopItem(itemDir, wsid string) ([]ModInfo, error) {
 		if st, err := os.Stat(dir); err != nil || !st.IsDir() {
 			continue
 		}
-		infoDir, ok := findInfoDir(dir)
-		if !ok {
-			continue
-		}
-		f, err := os.Open(filepath.Join(infoDir, "mod.info"))
-		if err != nil {
-			return nil, err
-		}
-		m, err := ParseModInfo(f)
-		f.Close()
+		m, ok, err := readMod(dir, wsid)
 		if err != nil {
 			return nil, fmt.Errorf("workshop item %s, mod %s: %w", wsid, e.Name(), err)
 		}
-		m.WorkshopID = wsid
-		m.FolderName = e.Name()
-		m.Dir = dir
-		m.MediaDirs = mediaDirs(dir, infoDir)
-		m.Maps = listMaps(m.MediaDirs...)
-		out = append(out, m)
+		if ok {
+			out = append(out, m)
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].FolderName < out[j].FolderName })
 	return out, nil
+}
+
+// LocalError is a folder of the server's mods directory whose mod.info
+// could not be read.
+type LocalError struct {
+	Folder string
+	Err    error
+}
+
+// ScanLocalMods lists the mods copied into the server's mods directory by
+// hand (WorkshopID ""): real directories that are not pzman mirrors.
+// Directory symlinks are skipped: PZ does not load a mod's scripts through one.
+func ScanLocalMods(modsDir string) ([]ModInfo, []LocalError, error) {
+	modsDir, err := filepath.Abs(modsDir)
+	if err != nil {
+		return nil, nil, err
+	}
+	entries, err := os.ReadDir(modsDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("scan mods folder: %w", err)
+	}
+	var out []ModInfo
+	var bad []LocalError
+	for _, e := range entries {
+		dir := filepath.Join(modsDir, e.Name())
+		if !e.IsDir() || isMirror(dir) || strings.HasPrefix(e.Name(), uploadPrefix) {
+			continue
+		}
+		m, ok, err := readMod(dir, "")
+		switch {
+		case err != nil:
+			bad = append(bad, LocalError{Folder: e.Name(), Err: err})
+		case ok:
+			out = append(out, m)
+		}
+	}
+	return out, bad, nil
+}
+
+// readMod reads the mod in dir, a folder of a mods directory; ok is false
+// when dir has no mod.info where PZ looks for it.
+func readMod(dir, wsid string) (ModInfo, bool, error) {
+	infoDir, ok := findInfoDir(dir)
+	if !ok {
+		return ModInfo{}, false, nil
+	}
+	f, err := os.Open(filepath.Join(infoDir, "mod.info"))
+	if err != nil {
+		return ModInfo{}, true, err
+	}
+	m, err := ParseModInfo(f)
+	f.Close()
+	if err != nil {
+		return ModInfo{}, true, err
+	}
+	m.WorkshopID = wsid
+	m.FolderName = filepath.Base(dir)
+	m.Dir = dir
+	m.MediaDirs = mediaDirs(dir, infoDir)
+	m.Maps = listMaps(m.MediaDirs...)
+	return m, true, nil
 }

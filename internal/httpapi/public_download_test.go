@@ -179,3 +179,40 @@ func TestPublicDownloads(t *testing.T) {
 		return resp.StatusCode == http.StatusOK
 	}, 5*time.Second, 50*time.Millisecond)
 }
+
+// Mods copied into the server's mods folder are one "local" item, repacked
+// when their files change: pzman is not told about the copy.
+func TestPublicLocalMods(t *testing.T) {
+	cfg := testConfig()
+	cfg.DataDir, cfg.InstallDir, cfg.ModsToken = t.TempDir(), t.TempDir(), "tok"
+	a, _ := newServerDB(t, cfg)
+	mod := filepath.Join(cfg.DataDir, "mods", "Mine", "common")
+	require.NoError(t, os.MkdirAll(mod, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(mod, "mod.info"), []byte("id=Mine\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(mod, "a.lua"), []byte("v1"), 0o644))
+	base := serve(t, a) + "/mods/tok/"
+	get := func(path string) (int, []byte) {
+		t.Helper()
+		resp, err := http.Get(base + path)
+		require.NoError(t, err)
+		defer resp.Body.Close()
+		b, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		return resp.StatusCode, b
+	}
+	listing := func(not string) publicapi.PackFiles {
+		t.Helper()
+		var l publicapi.PackFiles
+		require.Eventually(t, func() bool {
+			code, b := get("files/local")
+			return code == http.StatusOK && json.Unmarshal(b, &l) == nil && l.SHA256 != not
+		}, 10*time.Second, 50*time.Millisecond)
+		return l
+	}
+	before := listing("")
+	require.Len(t, before.Files, 2)
+	require.Equal(t, "Mine/common/a.lua", before.Files[0].Path)
+	require.NoError(t, os.WriteFile(filepath.Join(mod, "a.lua"), []byte("v2 longer"), 0o644))
+	after := listing(before.SHA256)
+	require.Equal(t, int64(len("v2 longer")), after.Files[0].Size)
+}

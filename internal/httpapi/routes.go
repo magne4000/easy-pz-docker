@@ -62,9 +62,11 @@ func mapErr(err error) error {
 	case errors.Is(err, store.ErrNotFound):
 		return huma.Error404NotFound("not found")
 	case errors.As(err, &busy), errors.Is(err, backup.ErrBusy), errors.Is(err, sched.ErrWindowOpen),
-		errors.Is(err, pz.ErrNotRunning), errors.Is(err, pz.ErrAlreadyRunning):
+		errors.Is(err, pz.ErrNotRunning), errors.Is(err, pz.ErrAlreadyRunning),
+		errors.Is(err, mods.ErrUploadBusy), errors.Is(err, mods.ErrUploadConflict):
 		return huma.Error409Conflict(err.Error())
-	case errors.Is(err, mods.ErrInvalidID), errors.Is(err, sched.ErrInvalidSchedule), errors.Is(err, steam.ErrCollectionNotFound):
+	case errors.Is(err, mods.ErrInvalidID), errors.Is(err, mods.ErrInvalidUpload), errors.Is(err, sched.ErrInvalidSchedule),
+		errors.Is(err, steam.ErrCollectionNotFound):
 		return huma.Error422UnprocessableEntity(err.Error())
 	case errors.Is(err, backup.ErrMissing):
 		return huma.Error410Gone(err.Error())

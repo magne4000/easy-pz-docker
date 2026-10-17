@@ -47,10 +47,11 @@ type Options struct {
 }
 
 type Service struct {
-	o     Options
-	mu    sync.Mutex // serialises mutations of links + ini
-	scanM sync.Mutex
-	scans map[string]scanResult
+	o        Options
+	mu       sync.Mutex // serialises mutations of links + ini
+	uploadMu sync.Mutex // one mod upload at a time
+	scanM    sync.Mutex
+	scans    map[string]scanResult
 }
 
 type scanResult struct {
@@ -102,17 +103,20 @@ func (s *Service) invalidate(ids ...string) {
 func (s *Service) changed() { s.o.Bus.Publish(events.ModsChanged{}) }
 
 type ModView struct {
-	ModID    string   `json:"modId"`
-	Name     string   `json:"name"`
-	Folder   string   `json:"folder"`
-	Enabled  bool     `json:"enabled"`
-	Requires []string `json:"requires"`
-	Missing  []string `json:"missing" doc:"requirements not provided by any enabled mod"`
-	Maps     []string `json:"maps"`
+	ModID      string   `json:"modId"`
+	Name       string   `json:"name"`
+	Folder     string   `json:"folder"`
+	Enabled    bool     `json:"enabled"`
+	Overridden bool     `json:"overridden" doc:"another copy of this mod id loads instead: the local copy without Steam, the Workshop copy with Steam"`
+	Requires   []string `json:"requires"`
+	Missing    []string `json:"missing" doc:"requirements not provided by any enabled mod"`
+	Maps       []string `json:"maps"`
 }
 
 type ItemView struct {
-	WorkshopID       string    `json:"workshopId"`
+	WorkshopID       string    `json:"workshopId" doc:"empty for a local mod"`
+	Local            bool      `json:"local" doc:"a mod folder copied into the server's mods folder by hand"`
+	Folder           string    `json:"folder,omitempty" doc:"the local mod's folder in the mods folder"`
 	Title            string    `json:"title"`
 	Installed        bool      `json:"installed"`
 	InstalledUpdated time.Time `json:"installedUpdated,omitzero"`
@@ -137,15 +141,18 @@ type Overview struct {
 	Collection      string     `json:"collection"`
 }
 
-// state is the desired mod set computed from the DB and the downloaded files.
+// state is the desired mod set computed from the DB and the files on disk.
 type state struct {
-	items     []store.TrackedItem
-	installed map[string]steam.WorkshopItemState
-	scanned   map[string][]ModInfo
-	scanErr   map[string]error
-	entries   map[string]store.ModEntry // key wsid/modid; a scanned mod may have none yet
-	ordered   []ModInfo                 // enabled mods in load order
-	cycles    [][]string
+	items      []store.TrackedItem
+	installed  map[string]steam.WorkshopItemState
+	scanned    map[string][]ModInfo // by workshop id; "" holds the local mods
+	scanErr    map[string]error
+	local      []ModInfo // mods copied into the mods folder by hand
+	localBad   []LocalError
+	entries    map[string]store.ModEntry // key wsid/modid; a scanned mod may have none yet
+	overridden map[string]bool           // key wsid/modid: another copy of the id loads instead
+	ordered    []ModInfo                 // enabled mods in load order
+	cycles     [][]string
 }
 
 // enabled reports whether a scanned mod is enabled. A mod with no entry yet
@@ -166,10 +173,16 @@ func (s *Service) compute(ctx context.Context) (*state, error) {
 	if err != nil {
 		return nil, err
 	}
-	st := &state{items: items, installed: installed, scanned: map[string][]ModInfo{}, scanErr: map[string]error{}, entries: map[string]store.ModEntry{}}
+	st := &state{items: items, installed: installed, scanned: map[string][]ModInfo{}, scanErr: map[string]error{},
+		entries: map[string]store.ModEntry{}, overridden: map[string]bool{}}
 	for _, it := range items {
 		st.scanned[it.WorkshopID], st.scanErr[it.WorkshopID] = s.scan(it.WorkshopID)
 	}
+	// Rescanned on every read: local mods are copied in without telling pzman.
+	if st.local, st.localBad, err = ScanLocalMods(s.ModsDir()); err != nil {
+		return nil, err
+	}
+	st.scanned[""] = st.local
 	entries, err := s.o.DB.ListModEntries(ctx)
 	if err != nil {
 		return nil, err
@@ -177,6 +190,7 @@ func (s *Service) compute(ctx context.Context) (*state, error) {
 	for _, e := range entries {
 		st.entries[entryKey(e.WorkshopID, e.ModID)] = e
 	}
+	st.resolveCopies(s.o.NonSteam)
 	// Mods without an entry sort last, in discovery order.
 	pos := func(m ModInfo) int {
 		if e, ok := st.entries[entryKey(m.WorkshopID, m.ID)]; ok {
@@ -186,34 +200,82 @@ func (s *Service) compute(ctx context.Context) (*state, error) {
 	}
 	var enabled []ModInfo
 	seen := map[string]bool{}
+	add := func(m ModInfo) {
+		if st.enabled(m.WorkshopID, m.ID) && !st.overridden[entryKey(m.WorkshopID, m.ID)] && !seen[m.ID] {
+			seen[m.ID] = true
+			enabled = append(enabled, m)
+		}
+	}
 	for _, it := range items {
 		for _, m := range st.scanned[it.WorkshopID] {
-			if st.enabled(it.WorkshopID, m.ID) && !seen[m.ID] {
-				seen[m.ID] = true
-				enabled = append(enabled, m)
-			}
+			add(m)
 		}
+	}
+	for _, m := range st.local {
+		add(m)
 	}
 	slices.SortStableFunc(enabled, func(a, b ModInfo) int { return cmp.Compare(pos(a), pos(b)) })
 	st.ordered, _, st.cycles = SortLoadOrder(enabled)
 	return st, nil
 }
 
+// resolveCopies marks the copies of a mod id that another, enabled copy loads
+// instead of. Without Steam, pzman mirrors only the winner into the mods
+// folder, so the local copy wins. With Steam, PZ registers Workshop folders
+// before the mods folder and keeps the first copy of an id
+// (ZomboidFileSystem.setModIdToDir), so the Workshop copy wins.
+func (st *state) resolveCopies(nonSteam bool) {
+	localOn, workshopOn := map[string]bool{}, map[string]bool{}
+	for _, m := range st.local {
+		if st.enabled("", m.ID) {
+			localOn[m.ID] = true
+		}
+	}
+	for _, it := range st.items {
+		for _, m := range st.scanned[it.WorkshopID] {
+			if st.enabled(it.WorkshopID, m.ID) {
+				workshopOn[m.ID] = true
+			}
+		}
+	}
+	if nonSteam {
+		for _, it := range st.items {
+			for _, m := range st.scanned[it.WorkshopID] {
+				if localOn[m.ID] {
+					st.overridden[entryKey(it.WorkshopID, m.ID)] = true
+				}
+			}
+		}
+		return
+	}
+	for _, m := range st.local {
+		if workshopOn[m.ID] {
+			st.overridden[entryKey("", m.ID)] = true
+		}
+	}
+}
+
 // persistEntries records every scanned mod that has no entry yet, in
 // discovery order, so an explicit choice (enable/disable, order) has a row to
 // land on. Only write paths call it; compute stays read-only.
 func (s *Service) persistEntries(ctx context.Context, st *state) error {
-	for _, it := range st.items {
-		for _, m := range st.scanned[it.WorkshopID] {
-			if _, ok := st.entries[entryKey(it.WorkshopID, m.ID)]; ok {
+	ensure := func(wsid string, ms []ModInfo) error {
+		for _, m := range ms {
+			if _, ok := st.entries[entryKey(wsid, m.ID)]; ok {
 				continue
 			}
-			if err := s.o.DB.EnsureModEntry(ctx, it.WorkshopID, m.ID, true); err != nil {
+			if err := s.o.DB.EnsureModEntry(ctx, wsid, m.ID, true); err != nil {
 				return err
 			}
 		}
+		return nil
 	}
-	return nil
+	for _, it := range st.items {
+		if err := ensure(it.WorkshopID, st.scanned[it.WorkshopID]); err != nil {
+			return err
+		}
+	}
+	return ensure("", st.local)
 }
 
 func (st *state) modIDs() []string {
@@ -346,17 +408,33 @@ func (s *Service) overview(st *state) (Overview, error) {
 			v.Title = it.WorkshopID
 		}
 		for _, m := range st.scanned[it.WorkshopID] {
-			mv := ModView{ModID: m.ID, Name: m.Name, Folder: m.FolderName, Enabled: st.enabled(it.WorkshopID, m.ID), Requires: nonNil(m.Requires), Maps: nonNil(m.Maps), Missing: []string{}}
-			for _, r := range m.Requires {
-				if !enabled[r] {
-					mv.Missing = append(mv.Missing, r)
-				}
-			}
-			v.Mods = append(v.Mods, mv)
+			v.Mods = append(v.Mods, st.modView(m, enabled))
 		}
 		ov.Items = append(ov.Items, v)
 	}
+	var local []ItemView
+	for _, m := range st.local {
+		local = append(local, ItemView{Local: true, Folder: m.FolderName, Title: cmp.Or(m.Name, m.ID), Installed: true,
+			Mods: []ModView{st.modView(m, enabled)}})
+	}
+	for _, b := range st.localBad {
+		local = append(local, ItemView{Local: true, Folder: b.Folder, Title: b.Folder, Installed: true, Mods: []ModView{},
+			Error: b.Err.Error()})
+	}
+	slices.SortFunc(local, func(a, b ItemView) int { return strings.Compare(a.Folder, b.Folder) })
+	ov.Items = append(ov.Items, local...)
 	return ov, nil
+}
+
+func (st *state) modView(m ModInfo, enabled map[string]bool) ModView {
+	mv := ModView{ModID: m.ID, Name: m.Name, Folder: m.FolderName, Enabled: st.enabled(m.WorkshopID, m.ID),
+		Overridden: st.overridden[entryKey(m.WorkshopID, m.ID)], Requires: nonNil(m.Requires), Maps: nonNil(m.Maps), Missing: []string{}}
+	for _, r := range m.Requires {
+		if !enabled[r] {
+			mv.Missing = append(mv.Missing, r)
+		}
+	}
+	return mv
 }
 
 func nonNil(s []string) []string {
@@ -379,7 +457,7 @@ func (s *Service) Apply(ctx context.Context) (LinkResult, error) {
 	if s.o.NonSteam {
 		for _, it := range st.items {
 			for _, m := range st.scanned[it.WorkshopID] {
-				if _, dup := desired[m.FolderName]; !dup {
+				if _, dup := desired[m.FolderName]; !dup && !st.overridden[entryKey(it.WorkshopID, m.ID)] {
 					desired[m.FolderName] = m.Dir
 				}
 			}
@@ -536,6 +614,36 @@ func (s *Service) Remove(ctx context.Context, id string) error {
 	s.invalidate(id)
 	s.changed()
 	return nil
+}
+
+// RemoveLocal deletes a folder copied into the mods folder by hand, drops its
+// entry and rewrites the ini. Like a Workshop removal, a running server keeps
+// the mod loaded until the next restart.
+func (s *Service) RemoveLocal(ctx context.Context, folder string) error {
+	local, bad, err := ScanLocalMods(s.ModsDir())
+	if err != nil {
+		return err
+	}
+	// Only a folder the scan lists, so the name can never leave the mods folder.
+	found, modID := slices.ContainsFunc(bad, func(b LocalError) bool { return b.Folder == folder }), ""
+	for _, m := range local {
+		if m.FolderName == folder {
+			found, modID = true, m.ID
+		}
+	}
+	if !found {
+		return store.ErrNotFound
+	}
+	if err := os.RemoveAll(filepath.Join(s.ModsDir(), folder)); err != nil {
+		return err
+	}
+	if modID != "" {
+		if err := s.o.DB.DeleteModEntry(ctx, "", modID); err != nil {
+			return err
+		}
+	}
+	_, err = s.Apply(ctx)
+	return err
 }
 
 func (s *Service) SetEnabled(ctx context.Context, wsid, modID string, enabled bool) error {
