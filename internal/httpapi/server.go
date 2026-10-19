@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -53,6 +54,13 @@ type Server struct {
 	log      *slog.Logger
 	app      *fiber.App
 	shutdown sync.Once
+
+	// Run's listener: Shutdown closes it too, since a Fiber shutdown that
+	// lands before Serve has registered it is a no-op (fatal boot errors
+	// shut down right after start).
+	lnMu   sync.Mutex
+	ln     net.Listener
+	closed bool
 }
 
 // NewAPI builds the Fiber app with the Huma group mounted on /api.
@@ -127,18 +135,36 @@ func (s *Server) App() *fiber.App { return s.app }
 
 func (s *Server) Run(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
+	// "tcp", not Fiber's tcp4 default: it also accepts ::1, which is what localhost resolves to on macOS.
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", addr, err)
+	}
+	s.lnMu.Lock()
+	if s.closed {
+		s.lnMu.Unlock()
+		return ln.Close()
+	}
+	s.ln = ln
+	s.lnMu.Unlock()
 	s.log.Info("http listening", "addr", addr)
-	// Fiber defaults to tcp4; "tcp" also accepts ::1, which is what localhost resolves to on macOS.
-	err := s.app.Listen(addr, fiber.ListenConfig{GracefulContext: ctx, DisableStartupMessage: true, ListenerNetwork: fiber.NetworkTCP})
-	if err != nil && ctx.Err() != nil {
+	err = s.app.Listener(ln, fiber.ListenConfig{GracefulContext: ctx, DisableStartupMessage: true})
+	if err != nil && (ctx.Err() != nil || errors.Is(err, net.ErrClosed)) {
 		return nil
 	}
 	return err
 }
 
 func (s *Server) Shutdown(ctx context.Context) error {
+	s.lnMu.Lock()
+	s.closed = true
+	ln := s.ln
+	s.lnMu.Unlock()
 	var err error
 	s.shutdown.Do(func() { err = s.app.ShutdownWithContext(ctx) })
+	if ln != nil {
+		_ = ln.Close() // already closed when Serve was running
+	}
 	return err
 }
 
