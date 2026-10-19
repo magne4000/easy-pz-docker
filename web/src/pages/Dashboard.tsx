@@ -163,6 +163,8 @@ function ServerCard({ s }: { s: Schemas["ServerView"] }) {
   const running = s.state === "running";
   const stopped = s.state === "stopped" || s.state === "crashed";
   const busy = !!s.operation;
+  // Pelican: stopping only the game would leave the container running; Pelican's Stop stops both.
+  const pelican = useSystem().data?.host === "pelican";
 
   return (
     <Card className="lg:col-span-2">
@@ -245,9 +247,11 @@ function ServerCard({ s }: { s: Schemas["ServerView"] }) {
               <Button variant="outline" onClick={() => setLifecycle("restart")} disabled={busy}>
                 <RotateCw /> {t("Restart")}
               </Button>
-              <Button variant="outline" onClick={() => setLifecycle("stop")} disabled={busy}>
-                <Square /> {t("Stop")}
-              </Button>
+              {!pelican && (
+                <Button variant="outline" onClick={() => setLifecycle("stop")} disabled={busy}>
+                  <Square /> {t("Stop")}
+                </Button>
+              )}
             </>
           )}
           <Button variant="outline" onClick={() => save.mutate()} disabled={!running || save.isPending}>
@@ -470,6 +474,17 @@ export default function Dashboard() {
           <AlertTitle>{t("A volume is almost full")}</AlertTitle>
           <AlertDescription>
             {t("Backups and saves may fail. Free some space or lower the backup retention.")}
+          </AlertDescription>
+        </Alert>
+      )}
+      {sys.data?.eggAutoUpdate && (
+        <Alert className="mb-6">
+          <AlertTriangle />
+          <AlertTitle>{t("The egg updates the game at every start")}</AlertTitle>
+          <AlertDescription>
+            {t(
+              "AUTO_UPDATE=1 makes Pelican run SteamCMD before easy-pz starts: it ignores the game version lock and repeats the update easy-pz already does. Set AUTO_UPDATE to 0 in the server's Startup settings.",
+            )}
           </AlertDescription>
         </Alert>
       )}

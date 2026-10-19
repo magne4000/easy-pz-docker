@@ -48,6 +48,11 @@ func newServer(t *testing.T, cfg app.Config) *fiber.App {
 }
 
 func newServerDB(t *testing.T, cfg app.Config) (*fiber.App, *store.DB) {
+	s, db := newTestServer(t, cfg)
+	return s.App(), db
+}
+
+func newTestServer(t *testing.T, cfg app.Config) (*Server, *store.DB) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, slog.Default(), filepath.Join(t.TempDir(), "t.db"))
@@ -64,7 +69,7 @@ func newServerDB(t *testing.T, cfg app.Config) (*fiber.App, *store.DB) {
 	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms,
 		Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
 	require.NoError(t, err)
-	return s.App(), db
+	return s, db
 }
 
 // contentCMD reports every workshop item under the install dir as downloaded.
@@ -257,7 +262,9 @@ func TestMapErr(t *testing.T) {
 		&sched.BusyError{Op: "x"}: 409,
 		backup.ErrBusy:            409,
 		backup.ErrMissing:         410,
+		sched.ErrStopUnavailable:  409,
 		fmt.Errorf("%w: 3378285185", steam.ErrCollectionNotFound): 422,
+		fmt.Errorf("%w: stop", sched.ErrInvalidSchedule):          422,
 		errors.New("boom"):          500,
 		huma.Error403Forbidden("x"): 403,
 	} {
