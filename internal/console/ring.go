@@ -1,6 +1,7 @@
 package console
 
 import (
+	"io"
 	"sync"
 	"time"
 
@@ -15,6 +16,17 @@ type Ring struct {
 	n     int
 	seq   uint64
 	now   func() time.Time
+	// mirror, when set, receives every appended line as plain text (the
+	// Pelican console is pzman's stdout).
+	mirror io.Writer
+}
+
+// Mirror makes every later Append also write the line, newline-terminated,
+// to w, in sequence order. Write errors are ignored. Call before use.
+func (r *Ring) Mirror(w io.Writer) {
+	r.mu.Lock()
+	r.mirror = w
+	r.mu.Unlock()
 }
 
 func NewRing(capacity int) *Ring {
@@ -37,6 +49,9 @@ func (r *Ring) Append(text string) events.ConsoleLine {
 	} else {
 		r.buf[r.start] = line
 		r.start = (r.start + 1) % c
+	}
+	if r.mirror != nil {
+		_, _ = io.WriteString(r.mirror, text+"\n")
 	}
 	return line
 }

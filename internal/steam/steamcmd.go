@@ -51,7 +51,9 @@ type Options struct {
 	InstallDir string
 	Home       string
 	UID, GID   int
-	Stall      time.Duration
+	// Env is added to SteamCMD's environment (e.g. STEAM_PLATFORM=linux64).
+	Env   []string
+	Stall time.Duration
 	// Guard is consulted before app_update: game files must never be replaced
 	// under a live JVM. Workshop downloads are not guarded here — fetching a new
 	// item is safe while the server runs; mods.Service decides what may be fetched when.
@@ -84,7 +86,8 @@ func NewSteamCMD(o Options) *SteamCMD {
 var _ CMD = (*SteamCMD)(nil)
 
 func (s *SteamCMD) execRun(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
-	proc, err := sys.Proc{Name: "steamcmd", Bin: s.o.Bin, Args: args, Dir: s.o.Home, Home: s.o.Home, UID: s.o.UID, GID: s.o.GID}.Start(ctx)
+	proc, err := sys.Proc{Name: "steamcmd", Bin: s.o.Bin, Args: args, Dir: s.o.Home, Home: s.o.Home, UID: s.o.UID, GID: s.o.GID,
+		Env: s.o.Env}.Start(ctx)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -27,6 +27,8 @@ type Supervisor struct {
 	status  pz.Status
 	gen     int
 	crashes []time.Time
+	// answer replies to console commands like the game does (set by NewRCON).
+	answer func(ctx context.Context, cmd string) (string, error)
 }
 
 func NewSupervisor(o pz.ProcessOptions, sc Scenario) *Supervisor {
@@ -206,11 +208,24 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	return nil
 }
 
+// SendConsole behaves like the game's stdin: the reply goes to the console
+// output, never back to the caller.
 func (s *Supervisor) SendConsole(cmd string) error {
-	if s.Status().State == pz.StateStopped {
+	s.mu.Lock()
+	st, answer := s.status.State, s.answer
+	s.mu.Unlock()
+	if st != pz.StateRunning && st != pz.StateStarting && st != pz.StateStopping {
 		return pz.ErrNotRunning
 	}
-	s.line("> %s", cmd)
+	if answer == nil || st != pz.StateRunning {
+		return nil // not reading commands yet (or any more)
+	}
+	resp, _ := answer(context.Background(), cmd)
+	for _, l := range strings.Split(strings.TrimRight(resp, "\n"), "\n") {
+		if l != "" {
+			s.line("%s", l)
+		}
+	}
 	return nil
 }
 
@@ -225,6 +240,9 @@ type RCON struct {
 
 func NewRCON(sup *Supervisor, sc Scenario, onLine func(string)) *RCON {
 	r := &RCON{sup: sup, players: append([]string{}, sc.Players...), log: onLine}
+	sup.mu.Lock()
+	sup.answer = r.Exec
+	sup.mu.Unlock()
 	if sc.PlayersLeaveAfter > 0 {
 		time.AfterFunc(sc.PlayersLeaveAfter, func() {
 			r.mu.Lock()

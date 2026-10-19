@@ -19,6 +19,8 @@ type Proc struct {
 	// UID and GID are the identity the child runs as when pzman runs as
 	// root. A negative UID keeps pzman's own identity.
 	UID, GID int
+	// Env is added to pzman's environment (later entries win).
+	Env []string
 	// Stdin, when set, receives a pipe to the child's standard input.
 	Stdin *io.WriteCloser
 }
@@ -37,7 +39,7 @@ type Process struct {
 func (p Proc) Start(ctx context.Context) (*Process, error) {
 	cmd := exec.CommandContext(ctx, p.Bin, p.Args...)
 	cmd.Dir = p.Dir
-	cmd.Env = append(os.Environ(), "HOME="+p.Home)
+	cmd.Env = append(append(os.Environ(), p.Env...), "HOME="+p.Home)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if p.UID >= 0 && os.Getuid() == 0 {
 		cmd.SysProcAttr.Credential = &syscall.Credential{Uid: uint32(p.UID), Gid: uint32(p.GID)}
