@@ -427,14 +427,19 @@ from a URL with a path prefix.
 
 ### Phase 3: the `easy-pz` Pelican plugin (PHP, new `pelican-plugin/` folder)
 
-- [ ] `plugin.json`: `panel_version` pinned to the tested panel, `api_version: 1`,
+- [x] `plugin.json`: `panel_version` pinned to the tested panel, `api_version: 1`,
       `update_url` to the release's `pelican-plugin-update.json`; the release
       packages the plugin zip and that file (release assets contract).
-- [ ] Migration: `easy_pz_servers` (server id, encrypted secret, deployed pzman
+      `panel_version` is `^1.0.0-rc.1`: the panel compares with
+      `version_compare`, so `^1.0.0` would refuse `1.0.0-rc.1`. The workflow
+      `pelican-plugin.yml` checks the plugin (`php -l`, PHPUnit on the
+      framework-free classes) and, on `v*` tags, sets the plugin version and
+      the pinned pzman version from the tag.
+- [x] Migration: `easy_pz_servers` (server id, encrypted secret, deployed pzman
       version, UI allocation id, enabled).
-- [ ] Permissions: register the `easy-pz` group (table above) with a
+- [x] Permissions: register the `easy-pz` group (table above) with a
       `translation_prefix` and a language file for its labels.
-- [ ] Server page *Easy PZ*, visible when the egg has `easy_pz`:
+- [x] Server page *Easy PZ*, visible when the egg has `easy_pz`:
   - not enabled (admins): pick the UI allocation among the server's
     allocations; Enable;
   - enabled: status (pzman state, game build, players, update window, pending
@@ -443,7 +448,8 @@ from a URL with a path prefix.
     the matching permission, all through service calls;
   - *Open easy-pz*: handoff in a new tab;
   - admins: Upgrade (when the plugin pins a newer pzman), Disable.
-- [ ] Enable (warns first when the server has no memory limit: no heap to
+  - The host mode shown comes from the `host` field of `GET /api/system`.
+- [x] Enable (warns first when the server has no memory limit: no heap to
       derive, and the stock egg's install is capped at 1024 MiB):
   1. generate the secret; write `.easy-pz/pzman.env` (`putContent`);
   2. download the pinned `pzman-linux-amd64` in the panel, verify it against
@@ -451,18 +457,28 @@ from a URL with a path prefix.
      (Wings' `pull` cannot verify a checksum);
   3. startup command `./.easy-pz/pzman`, `AUTO_UPDATE=0`
      (`StartupModificationService`); restart the server.
-- [ ] Disable: restore the egg's startup command and `AUTO_UPDATE=1`; keep the
-      data and `.easy-pz/` (re-enable resumes).
-- [ ] Upgrade: redeploy the binary; applied at the next restart, or ask pzman
-      to open an update window.
-- [ ] Refuse to enable when the egg no longer matches the assumptions (stop
+  - The binary goes to `.easy-pz/pzman.next`, then replaces `.easy-pz/pzman`
+    by unlink + rename: a running executable cannot be written over and Wings
+    refuses to rename onto an existing file.
+  - `StartupModificationService` rewrites every egg variable (missing ones
+    become empty): the plugin passes all current values.
+- [x] Disable: restore the egg's startup command and `AUTO_UPDATE=1`; keep the
+      data and `.easy-pz/` (re-enable resumes). Restores the startup command
+      and `AUTO_UPDATE` saved at Enable (the stock egg defaults it to 0).
+- [x] Upgrade: redeploy the binary; applied at the next restart, or ask pzman
+      to open an update window. The Upgrade dialog offers Pelican's restart.
+- [x] Refuse to enable when the egg no longer matches the assumptions (stop
       command `quit`, `-cachedir=/home/container/.cache` in its startup,
       `SRCDS_APPID=380870`).
-- [ ] Public routes `/easy-pz/{server}/mods/{token}/{path?}`: streaming proxy
+- [x] Public routes `/easy-pz/{server}/mods/{token}/{path?}`: streaming proxy
       with `Range`, no session, the signed client-IP header, time limit off. At
       most 5 proxied downloads at once across the panel (configurable; the
       panel's 15 PHP-FPM workers are all taken at 15); beyond that, `429` with
       `Retry-After`, which the launcher already waits out (`pzclient.do`).
+      The slots are cache locks (TTL 120 s, refreshed while streaming). The
+      signed path is the one sent to pzman, percent-encoding kept, without the
+      query; paths with dot segments get 404. pzman's own `Retry-After` is
+      passed back too.
 
 Done when, on a fresh x86 Pelican: a stock PZ server gets easy-pz in one click;
 the owner opens easy-pz without logging in; a subuser with only
