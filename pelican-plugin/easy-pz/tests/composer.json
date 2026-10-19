@@ -1,0 +1,21 @@
+{
+    "name": "magne4000/easy-pz-pelican-plugin-tests",
+    "description": "Unit tests of the easy-pz Pelican plugin's framework-free classes (not part of the plugin package)",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.3"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^12.0"
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Magne4000\\EasyPz\\Support\\": "../src/Support/",
+            "Magne4000\\EasyPz\\Tests\\": "Unit/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

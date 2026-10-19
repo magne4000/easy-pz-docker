@@ -1,0 +1,18 @@
+{
+    "id": "easy-pz",
+    "name": "Easy PZ",
+    "author": "magne4000",
+    "version": "0.0.0-dev",
+    "description": "Runs easy-pz (pzman) in Project Zomboid servers made from the stock egg: mods, update windows, backups and the public mod page, with Pelican's logins and permissions.",
+    "category": "plugin",
+    "url": "https://github.com/magne4000/easy-pz-docker",
+    "update_url": "https://github.com/magne4000/easy-pz-docker/releases/latest/download/pelican-plugin-update.json",
+    "namespace": "Magne4000\\EasyPz",
+    "class": "EasyPzPlugin",
+    "panels": [
+        "server"
+    ],
+    "panel_version": "^1.0.0-rc.1",
+    "api_version": 1,
+    "composer_packages": null
+}
