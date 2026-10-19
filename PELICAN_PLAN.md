@@ -285,29 +285,46 @@ What changed in the plan:
 
 ### Phase 1: pzman Pelican-mode runtime (Go)
 
-- [ ] Mode: `PZMAN_HOST=pelican` (from the environment or `pzman.env`); docker
+- [x] Mode: `PZMAN_HOST=pelican` (from the environment or `pzman.env`); docker
       mode is the default and unchanged.
-- [ ] `pzman.env` loading, environment wins; validation reports both sources.
-- [ ] Path defaults from the layout table; `PANEL_STEAMCMD=./steamcmd/steamcmd.sh`.
-- [ ] Non-root: skip the boot ownership fix (`boot.go`, `FixOwnership` loop);
+- [x] `pzman.env` loading, environment wins; validation reports both sources.
+      Each configuration error names the variable's source (`the environment`,
+      the `pzman.env` path, `SERVER_PORT from …`, `derived from SERVER_MEMORY`).
+- [x] Path defaults from the layout table; `PANEL_STEAMCMD=./steamcmd/steamcmd.sh`.
+      The root is the parent of the executable's directory; a relative path
+      value is resolved against it; logs go to `PANEL_LOG_DIR`
+      (`.easy-pz/logs`); `STEAM_PLATFORM=linux64` unless set.
+- [x] Non-root: skip the boot ownership fix (`boot.go`, `FixOwnership` loop);
       PUID/PGID ignored (credential switching is already skipped when not root).
-- [ ] Egg aliases: `SERVER_PORT`→`DEFAULT_PORT`, `STEAM_PORT`→`UDP_PORT`,
+- [x] Egg aliases: `SERVER_PORT`→`DEFAULT_PORT`, `STEAM_PORT`→`UDP_PORT`,
       `ADMIN_USER`→`ADMIN_USERNAME`, `SRCDS_BETAID`→`SERVER_BRANCH`; heap from
       `SERVER_MEMORY` (MiB, with headroom) when `MEMORY_XMX_GB` is unset and the
       limit is not 0. One documented precedence order, tested.
-- [ ] Console: every console-ring line (game, `[steamcmd]`, pzman events) also
+      Order (`internal/app/pelican.go`): environment > `pzman.env` > egg alias
+      or derived heap > layout default > built-in default; a pzman variable set
+      anywhere beats its egg alias. Heap: `max(1, floor(SERVER_MEMORY × 0.75 / 1024))`
+      GiB (6144 MiB → 4 GiB).
+- [x] Console: every console-ring line (game, `[steamcmd]`, pzman events) also
       to stdout as plain text; pzman's JSON logs to `.easy-pz/logs/` instead of
-      stdout.
-- [ ] stdin: `quit` (the egg's stop command) runs pzman's shutdown (save, quit,
+      stdout. `pzman.log`, rotated to `pzman.log.1` at start above 10 MiB.
+- [x] stdin: `quit` (the egg's stop command) runs pzman's shutdown (save, quit,
       await JVM) and exits 0; any other line goes to the game's stdin, which
       PZ reads (`System.in`); its reply reaches the console through the
       mirrored game lines. The supervisor already holds that stdin pipe.
-- [ ] Lifecycle: no pzman action leaves the container running with the game
+      With the game not running, a `[pzman]` console line says so; EOF on
+      stdin only stops reading.
+- [x] Lifecycle: no pzman action leaves the container running with the game
       stopped; Stop in the UI and the `stop` schedule action are hidden in
       Pelican mode. Fatal boot errors exit non-zero (Wings' crash handling).
-- [ ] `.pelicanignore`: maintain a marked block excluding the game install,
+      `POST /api/server/stop` answers 409; creating or updating a `stop`
+      schedule answers 422; existing ones are not registered (warning logged).
+      `GET /api/system` has `host` (`docker` | `pelican`), `eggAutoUpdate`,
+      `memoryXmxGB`, `gamePort`, `udpPort`.
+- [x] `.pelicanignore`: maintain a marked block excluding the game install,
       `steamcmd/`, `.easy-pz/backups/`, `.easy-pz/cache/`, `.easy-pz/steam/`.
-- [ ] Warn in the UI when `AUTO_UPDATE=1`: the yolk's boot-time update bypasses
+      Also `.easy-pz/logs/`; patterns are anchored at the root (`/media/`), so
+      a mod's `media/` under `.cache/` stays in the backup.
+- [x] Warn in the UI when `AUTO_UPDATE=1`: the yolk's boot-time update bypasses
       the game version lock.
 - [ ] Release: static `pzman-linux-amd64` (and `-arm64` for local development)
       plus `pzman-SHA256SUMS` attached to each `v*` release (release assets
