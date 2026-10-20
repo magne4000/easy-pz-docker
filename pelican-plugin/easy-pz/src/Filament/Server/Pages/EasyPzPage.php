@@ -453,7 +453,7 @@ class EasyPzPage extends Page
                 ->label(trans('easy-pz::strings.enable.allocation'))
                 ->helperText(trans('easy-pz::strings.enable.allocation_help'))
                 ->options(fn () => $this->allocationOptions())
-                ->default($ez?->ui_allocation_id ?? array_key_first($this->allocationOptions()))
+                ->default($ez?->ui_allocation_id ?? EasyPzService::defaultUiAllocationId($this->server()))
                 ->required(),
             TextInput::make('ui_url_override')
                 ->label(trans('easy-pz::strings.enable.override'))

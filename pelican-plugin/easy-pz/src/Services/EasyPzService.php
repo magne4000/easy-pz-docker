@@ -20,6 +20,7 @@ use Magne4000\EasyPz\Support\PzmanEnv;
 use Magne4000\EasyPz\Support\Scopes;
 use Magne4000\EasyPz\Support\SigningKey;
 use Magne4000\EasyPz\Support\Sha256Sums;
+use Magne4000\EasyPz\Support\UiAllocations;
 use Magne4000\EasyPz\Support\Urls;
 use RuntimeException;
 
@@ -104,6 +105,19 @@ class EasyPzService
             ->get()
             ->mapWithKeys(fn (Allocation $allocation) => [$allocation->id => $allocation->address])
             ->all();
+    }
+
+    /** The picker's default: not the primary allocation, nor the one of the egg's STEAM_PORT. */
+    public static function defaultUiAllocationId(Server $server): ?int
+    {
+        $ports = $server->allocations()
+            ->where('id', '!=', $server->allocation_id)
+            ->orderBy('port')
+            ->pluck('port', 'id')
+            ->map(fn ($port) => (int) $port)
+            ->all();
+
+        return UiAllocations::defaultId($ports, self::variables($server)['STEAM_PORT'] ?? null);
     }
 
     public static function envFile(Server $server, EasyPzServer $ez): string
@@ -276,7 +290,7 @@ class EasyPzService
     }
 
     /** @return array<string, string> the server's current variable values */
-    private function variables(Server $server): array
+    private static function variables(Server $server): array
     {
         $values = [];
         foreach ($server->variables()->get() as $variable) {

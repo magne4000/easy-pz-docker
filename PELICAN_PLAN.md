@@ -458,6 +458,7 @@ from a URL with a path prefix.
     `AuthenticateSession` (ends with a password change) and
     `RequireTwoFactorAuthentication`.
   - The handoff takes an optional `?to=<same-origin absolute path>` (≤ 512 chars, no `//`, `\` or control characters; anything else is ignored) and passes it on as `#t=<token>&to=<rawurlencoded path>`, for pzman's session renewal.
+  - The UI allocation picker defaults to the first allocation that is neither the primary one nor the one of the egg's `STEAM_PORT`.
   - A UI allocation no longer assigned to the server (an owner can detach
     it) counts as missing: no service call, handoff or proxied request goes
     to that port.
