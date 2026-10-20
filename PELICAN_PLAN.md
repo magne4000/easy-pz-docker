@@ -350,25 +350,43 @@ window restarts PZ while Pelican keeps showing the server running.
 
 ### Phase 2: pzman auth and public URLs for Pelican (Go + SPA)
 
-- [ ] Token verification (EdDSA, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
+- [x] Token verification (EdDSA, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
       single-use `jti` store for handoffs.
-- [ ] `POST /api/auth/pelican` (handoff → session with scopes, username from
+      Every token (handoff and bearer) is single-use; the in-memory store keeps
+      a `jti` until `exp` + 30 s and fails closed past 10 000 live entries.
+      `iat`, `exp`, `scp` (an array) and a `jti` of 22–128 base64url/hex
+      characters are required; unknown scopes are ignored (a newer plugin may
+      grant scopes this pzman lacks). Go tests pin the plugin's own vectors.
+- [x] `POST /api/auth/pelican` (handoff → session with scopes, username from
       `name`); SPA route `/auth/pelican` reads the fragment and posts it.
-- [ ] Bearer authentication for service calls; CSRF check skipped for Bearer.
-- [ ] Scopes in the session; per-operation enforcement from Huma tags + method
+      A token without `read` gets 403. `GET /api/auth/session` has `username`
+      (was `user`), `scopes`, `host` and, on Pelican, `pelicanPanelUrl`.
+- [x] Bearer authentication for service calls; CSRF check skipped for Bearer.
+      Skipped only when the request has no session cookie; Pelican mode only.
+- [x] Scopes in the session; per-operation enforcement from Huma tags + method
       (table above); 403 with a clear message; SPA hides what is not allowed.
-- [ ] Pelican mode: password login disabled, `PANEL_ADMIN_PASSWORD_HASH` not
+      `GET /backups/{id}/download` needs `backups` (operation metadata); a
+      test walks every registered operation against the table. Writes of
+      Mods' "update when empty" buttons call `/updates/*`: `control`.
+- [x] Pelican mode: password login disabled, `PANEL_ADMIN_PASSWORD_HASH` not
       required; the login page says to open easy-pz from Pelican, with a link to
       `PZMAN_PELICAN_PANEL_URL`.
-- [ ] Public URLs: `PANEL_PUBLIC_URL` may carry a path in Pelican mode; page
+- [x] Public URLs: `PANEL_PUBLIC_URL` may carry a path in Pelican mode; page
       assets, `data.json` links, pack and file downloads all derive from it.
-- [ ] Client IP behind the panel: every local client, the panel included,
+      Links are path-absolute under that path (Docker output unchanged);
+      `mods.html` gets its `/assets/` URLs prefixed and its favicon inlined
+      when served.
+- [x] Client IP behind the panel: every local client, the panel included,
       reaches pzman from `172.18.0.1` (Phase 0), so an address-based trusted
       proxy cannot tell the panel from anyone else. The plugin signs each
       proxied request (Ed25519 over method, path and
       a timestamp, in a header); pzman takes `X-Forwarded-For` only from signed
       requests, so per-IP limits apply to players.
-- [ ] Audit: actions logged with the Pelican username.
+      In Pelican mode Fiber's `ProxyHeader` is off: `X-Forwarded-For` counts
+      nowhere else.
+- [x] Audit: actions logged with the Pelican username.
+      Every Pelican write (`pelican action`, with status) and every refusal
+      (`pelican action refused`) goes to `pzman.log`.
 
 Done when: a forged, expired, replayed or wrong-server token is refused; a
 token with `read` only cannot change anything; the mod page and launcher work
