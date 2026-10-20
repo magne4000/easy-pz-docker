@@ -436,7 +436,10 @@ from a URL with a path prefix.
       framework-free classes) and, on `v*` tags, sets the plugin version and
       the pinned pzman version from the tag.
 - [x] Migration: `easy_pz_servers` (server id, encrypted secret, deployed pzman
-      version, UI allocation id, enabled).
+      version, UI allocation id, enabled). The secret is the server's Ed25519
+      secret key (`signing_key`, hex, encrypted with the app key); it is kept
+      across Disable and re-Enable. `pzman.env` gets only the public key, so
+      file, SFTP or backup access to the server cannot sign tokens.
 - [x] Permissions: register the `easy-pz` group (table above) with a
       `translation_prefix` and a language file for its labels.
 - [x] Server page *Easy PZ*, visible when the egg has `easy_pz`:
@@ -449,6 +452,14 @@ from a URL with a path prefix.
   - *Open easy-pz*: handoff in a new tab;
   - admins: Upgrade (when the plugin pins a newer pzman), Disable.
   - The host mode shown comes from the `host` field of `GET /api/system`.
+  - Versions are compared with a leading `v` stripped (pzman reports
+    `v1.2.3`, the plugin pins `1.2.3`).
+  - *Open easy-pz* runs behind the panel pages' session checks too:
+    `AuthenticateSession` (ends with a password change) and
+    `RequireTwoFactorAuthentication`.
+  - A UI allocation no longer assigned to the server (an owner can detach
+    it) counts as missing: no service call, handoff or proxied request goes
+    to that port.
 - [x] Enable (warns first when the server has no memory limit: no heap to
       derive, and the stock egg's install is capped at 1024 MiB):
   1. generate the secret; write `.easy-pz/pzman.env` (`putContent`);
@@ -478,7 +489,13 @@ from a URL with a path prefix.
       The slots are cache locks (TTL 120 s, refreshed while streaming). The
       signed path is the one sent to pzman, percent-encoding kept, without the
       query; paths with dot segments get 404. pzman's own `Retry-After` is
-      passed back too.
+      passed back too. The mods route also takes the launcher's
+      `POST files/<id>` (body and `Content-Type` forwarded). Every proxied
+      response carries `Content-Security-Policy: sandbox allow-scripts
+      allow-downloads allow-popups`, `X-Content-Type-Options: nosniff` and
+      `Access-Control-Allow-Origin: *`, over pzman's values: the content comes
+      from a binary the server owner can replace, so it must not run with the
+      panel's origin.
 
 Done when, on a fresh x86 Pelican: a stock PZ server gets easy-pz in one click;
 the owner opens easy-pz without logging in; a subuser with only
