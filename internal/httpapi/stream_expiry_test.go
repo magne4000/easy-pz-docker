@@ -97,3 +97,42 @@ func TestTicketOfAnEndedSession(t *testing.T) {
 	_, err = a.tickets.use(id, "/api/events")
 	require.ErrorContains(t, err, "the session that made the ticket ended")
 }
+
+// One session cannot fill the shared ticket store.
+func TestTicketsPerSubject(t *testing.T) {
+	c := &pelicanClient{t: t, app: newServer(t, pelicanConfig())}
+	alice := &pelicanClient{t: t, app: c.app, session: sessionFor(t, time.Now().Add(time.Hour), scopeRead)}
+	ticket := func(cl *pelicanClient) int {
+		return cl.do(http.MethodPost, "/api/auth/ticket", `{"path":"/api/events"}`).StatusCode
+	}
+	for i := range maxTicketsPerSubject {
+		require.Equal(t, http.StatusOK, ticket(alice), i)
+	}
+	require.Equal(t, http.StatusTooManyRequests, ticket(alice))
+
+	other, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{"sub": "other-uuid", "scp": []string{scopeRead},
+		"exp": time.Now().Add(time.Hour).Unix()}).SignedString([]byte(testConfig().JWTSecret))
+	require.NoError(t, err)
+	require.Equal(t, http.StatusOK, ticket(&pelicanClient{t: t, app: c.app, session: other}), "other users are not affected")
+
+	// Using a ticket frees its slot; so does expiry.
+	tk := newTickets(time.Now)
+	p := principal{Subject: "s"}
+	var ids []string
+	for range maxTicketsPerSubject {
+		id, _, err := tk.issue(p, "/api/events")
+		require.NoError(t, err)
+		ids = append(ids, id)
+	}
+	_, _, err = tk.issue(p, "/api/events")
+	require.ErrorIs(t, err, errTooManyTickets)
+	_, err = tk.use(ids[0], "/api/events")
+	require.NoError(t, err)
+	_, _, err = tk.issue(p, "/api/events")
+	require.NoError(t, err)
+	later := time.Now().Add(ticketTTL + time.Second)
+	tk.now = func() time.Time { return later }
+	_, _, err = tk.issue(p, "/api/events")
+	require.NoError(t, err, "expired tickets are swept")
+	require.Equal(t, 1, tk.bySubject["s"])
+}

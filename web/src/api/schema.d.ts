@@ -86,7 +86,7 @@ export interface paths {
         put?: never;
         /**
          * A single-use, 30 s ticket for the event stream or a backup download
-         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user, scopes and expiry.
+         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user, scopes and expiry. At most 16 live tickets per user (429).
          */
         post: operations["create-ticket"];
         delete?: never;
@@ -1980,6 +1980,15 @@ export interface operations {
             };
             /** @description Unprocessable Entity */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

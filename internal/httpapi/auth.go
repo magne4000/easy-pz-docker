@@ -435,11 +435,14 @@ func (a *auth) register(api huma.API) {
 		Metadata: map[string]any{scopeMeta: scopeRead},
 		Summary:  "A single-use, 30 s ticket for the event stream or a backup download",
 		Description: "For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` " +
-			"on the given path. It carries the session's user, scopes and expiry.",
-		Errors: []int{http.StatusServiceUnavailable},
+			"on the given path. It carries the session's user, scopes and expiry. At most 16 live tickets per user (429).",
+		Errors: []int{http.StatusTooManyRequests, http.StatusServiceUnavailable},
 	}, func(ctx context.Context, in *TicketInput) (*TicketOutput, error) {
 		id, exp, err := a.tickets.issue(principalFrom(ctx), in.Body.Path)
-		if err != nil {
+		switch {
+		case errors.Is(err, errTooManyTickets):
+			return nil, huma.Error429TooManyRequests(err.Error())
+		case err != nil:
 			return nil, huma.Error503ServiceUnavailable(err.Error())
 		}
 		out := &TicketOutput{}

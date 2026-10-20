@@ -15,8 +15,13 @@ import (
 const (
 	ticketTTL      = 30 * time.Second
 	maxLiveTickets = 10000
-	ticketMeta     = "ticket"
+	// maxTicketsPerSubject keeps one session from filling the shared store:
+	// the SPA holds one or two at a time.
+	maxTicketsPerSubject = 16
+	ticketMeta           = "ticket"
 )
+
+var errTooManyTickets = errors.New("too many tickets in flight for this user, retry in a few seconds")
 
 type ticket struct {
 	p    principal
@@ -63,10 +68,13 @@ func (t *tickets) issue(p principal, path string) (string, time.Time, error) {
 	exp := now.Add(ticketTTL)
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if len(t.m) >= maxLiveTickets {
+	if len(t.m) >= maxLiveTickets || t.bySubject[p.Subject] >= maxTicketsPerSubject {
 		t.sweep(now)
 	}
-	if len(t.m) >= maxLiveTickets {
+	switch {
+	case t.bySubject[p.Subject] >= maxTicketsPerSubject:
+		return "", time.Time{}, errTooManyTickets
+	case len(t.m) >= maxLiveTickets:
 		return "", time.Time{}, errors.New("too many tickets in flight, retry in a minute")
 	}
 	t.m[id] = ticket{p: p, path: path, exp: exp}
