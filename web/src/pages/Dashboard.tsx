@@ -38,6 +38,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes, formatDate, formatDuration, formatRelative } from "@/lib/format";
+import { useCan } from "@/lib/scopes";
 import { cn } from "@/lib/utils";
 
 type Lifecycle = "stop" | "restart";
@@ -165,6 +166,7 @@ function ServerCard({ s }: { s: Schemas["ServerView"] }) {
   const busy = !!s.operation;
   // Pelican: stopping only the game would leave the container running; Pelican's Stop stops both.
   const pelican = useSystem().data?.host === "pelican";
+  const control = useCan("control");
 
   return (
     <Card className="lg:col-span-2">
@@ -230,37 +232,39 @@ function ServerCard({ s }: { s: Schemas["ServerView"] }) {
             <span>
               {t("In progress")}: <strong>{t(s.operation)}</strong> · {formatRelative(s.operationSince)}
             </span>
-            {(s.operation === "restart" || s.operation === "stop") && (
+            {control && (s.operation === "restart" || s.operation === "stop") && (
               <Button size="sm" variant="outline" onClick={() => cancel.mutate()}>
                 {t("Cancel countdown")}
               </Button>
             )}
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
-          {stopped ? (
-            <Button onClick={() => start.mutate()} disabled={busy || start.isPending}>
-              <Play /> {t("Start")}
-            </Button>
-          ) : (
-            <>
-              <Button variant="outline" onClick={() => setLifecycle("restart")} disabled={busy}>
-                <RotateCw /> {t("Restart")}
+        {control && (
+          <div className="flex flex-wrap gap-2">
+            {stopped ? (
+              <Button onClick={() => start.mutate()} disabled={busy || start.isPending}>
+                <Play /> {t("Start")}
               </Button>
-              {!pelican && (
-                <Button variant="outline" onClick={() => setLifecycle("stop")} disabled={busy}>
-                  <Square /> {t("Stop")}
+            ) : (
+              <>
+                <Button variant="outline" onClick={() => setLifecycle("restart")} disabled={busy}>
+                  <RotateCw /> {t("Restart")}
                 </Button>
-              )}
-            </>
-          )}
-          <Button variant="outline" onClick={() => save.mutate()} disabled={!running || save.isPending}>
-            <Save /> {t("Save world")}
-          </Button>
-          <Button variant="outline" onClick={() => setBroadcast(true)} disabled={!running}>
-            <Megaphone /> {t("Broadcast")}
-          </Button>
-        </div>
+                {!pelican && (
+                  <Button variant="outline" onClick={() => setLifecycle("stop")} disabled={busy}>
+                    <Square /> {t("Stop")}
+                  </Button>
+                )}
+              </>
+            )}
+            <Button variant="outline" onClick={() => save.mutate()} disabled={!running || save.isPending}>
+              <Save /> {t("Save world")}
+            </Button>
+            <Button variant="outline" onClick={() => setBroadcast(true)} disabled={!running}>
+              <Megaphone /> {t("Broadcast")}
+            </Button>
+          </div>
+        )}
       </CardContent>
       <LifecycleDialog kind={lifecycle} onClose={() => setLifecycle(null)} />
       <BroadcastDialog open={broadcast} onClose={() => setBroadcast(false)} />
@@ -317,6 +321,7 @@ function UpdatesCard() {
     success: t("Update window cancelled"),
     invalidate: [keys.updates],
   });
+  const control = useCan("control");
   const d = u.data;
   const w = d?.window;
   const active = w && w.state !== "idle" && w.state !== "failed";
@@ -376,37 +381,39 @@ function UpdatesCard() {
             )}
           </div>
         )}
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
-            <RefreshCw className={cn(check.isPending && "animate-spin")} /> {t("Check now")}
-          </Button>
-          {w?.state === "waiting" ? (
-            <>
-              <Button size="sm" onClick={() => apply.mutate(true)} disabled>
-                <Download /> {t("Waiting…")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => cancel.mutate()}>
-                {t("Cancel")}
-              </Button>
-            </>
-          ) : (
-            !active && (
+        {control && (
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" size="sm" onClick={() => check.mutate()} disabled={check.isPending}>
+              <RefreshCw className={cn(check.isPending && "animate-spin")} /> {t("Check now")}
+            </Button>
+            {w?.state === "waiting" ? (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => apply.mutate(false)}
-                  disabled={apply.isPending}
-                >
-                  {t("Update when empty")}
+                <Button size="sm" onClick={() => apply.mutate(true)} disabled>
+                  <Download /> {t("Waiting…")}
                 </Button>
-                <Button size="sm" onClick={() => apply.mutate(true)} disabled={apply.isPending}>
-                  <Download /> {t("Update now")}
+                <Button size="sm" variant="outline" onClick={() => cancel.mutate()}>
+                  {t("Cancel")}
                 </Button>
               </>
-            )
-          )}
-        </div>
+            ) : (
+              !active && (
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => apply.mutate(false)}
+                    disabled={apply.isPending}
+                  >
+                    {t("Update when empty")}
+                  </Button>
+                  <Button size="sm" onClick={() => apply.mutate(true)} disabled={apply.isPending}>
+                    <Download /> {t("Update now")}
+                  </Button>
+                </>
+              )
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );

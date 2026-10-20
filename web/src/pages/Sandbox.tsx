@@ -14,6 +14,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { useCan } from "@/lib/scopes";
 import { cn } from "@/lib/utils";
 
 type Entry = Schemas["SandboxEntryView"];
@@ -44,7 +45,17 @@ export function choices(e: Entry, current: string): { value: string; label: stri
   return opts.sort((a, b) => Number(a.value) - Number(b.value));
 }
 
-function Field({ entry, value, onChange }: { entry: Entry; value: string; onChange: (v: string) => void }) {
+function Field({
+  entry,
+  value,
+  readOnly,
+  onChange,
+}: {
+  entry: Entry;
+  value: string;
+  readOnly: boolean;
+  onChange: (v: string) => void;
+}) {
   if (entry.readOnly) {
     return <p className="bg-muted rounded-md px-3 py-1.5 font-mono text-xs">{entry.value}</p>;
   }
@@ -53,6 +64,7 @@ function Field({ entry, value, onChange }: { entry: Entry; value: string; onChan
       <Switch
         checked={value === "true"}
         onCheckedChange={(v) => onChange(v ? "true" : "false")}
+        disabled={readOnly}
         aria-label={entry.key}
       />
     );
@@ -60,7 +72,7 @@ function Field({ entry, value, onChange }: { entry: Entry; value: string; onChan
   const opts = entry.kind === "int" ? choices(entry, value) : [];
   if (opts.length > 0) {
     return (
-      <Select value={value} onValueChange={onChange}>
+      <Select value={value} onValueChange={onChange} disabled={readOnly}>
         <SelectTrigger className="w-full max-w-72" aria-label={entry.key}>
           <SelectValue />
         </SelectTrigger>
@@ -82,6 +94,7 @@ function Field({ entry, value, onChange }: { entry: Entry; value: string; onChan
       aria-label={entry.key}
       aria-invalid={problem(entry, value) != null}
       className={cn("font-mono text-xs", numeric && "max-w-40")}
+      readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}
     />
   );
@@ -132,6 +145,7 @@ export default function Sandbox() {
     return [...out];
   }, [entries, filter]);
   const invalid = entries.some((e) => e.key in edits && problem(e, edits[e.key]) != null);
+  const edit = useCan("config");
 
   return (
     <div>
@@ -146,15 +160,19 @@ export default function Sandbox() {
               onChange={(e) => setFilter(e.target.value)}
               className="w-56"
             />
-            <Button variant="outline" disabled={!dirty} onClick={reset}>
-              <RotateCcw /> {t("Discard")}
-            </Button>
-            <Button
-              disabled={!dirty || invalid || save.isPending}
-              onClick={() => save.mutate(undefined, { onSuccess: reset })}
-            >
-              <Save /> {t("Save")}
-            </Button>
+            {edit && (
+              <>
+                <Button variant="outline" disabled={!dirty} onClick={reset}>
+                  <RotateCcw /> {t("Discard")}
+                </Button>
+                <Button
+                  disabled={!dirty || invalid || save.isPending}
+                  onClick={() => save.mutate(undefined, { onSuccess: reset })}
+                >
+                  <Save /> {t("Save")}
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -232,7 +250,12 @@ export default function Sandbox() {
                       )
                     }
                   >
-                    <Field entry={e} value={value} onChange={(v) => set(e.key, e.value, v)} />
+                    <Field
+                      entry={e}
+                      value={value}
+                      readOnly={!edit}
+                      onChange={(v) => set(e.key, e.value, v)}
+                    />
                   </SettingRow>
                 );
               })}

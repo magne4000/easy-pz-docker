@@ -24,6 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate, formatRelative, parseMinutes } from "@/lib/format";
+import { useCan } from "@/lib/scopes";
 
 type Input_ = Schemas["ScheduleInput"];
 type Action = Input_["action"];
@@ -209,6 +210,7 @@ export default function Schedules() {
       ),
     { invalidate: [keys.schedules] },
   );
+  const edit = useCan("schedules");
   const d = q.data;
   return (
     <div>
@@ -216,9 +218,11 @@ export default function Schedules() {
         title={t("Scheduler")}
         description={t("Timezone: {{tz}}", { tz: d?.timezone ?? "…" })}
         actions={
-          <Button onClick={() => setEditing({ ...empty })}>
-            <Plus /> {t("New schedule")}
-          </Button>
+          edit && (
+            <Button onClick={() => setEditing({ ...empty })}>
+              <Plus /> {t("New schedule")}
+            </Button>
+          )
         }
       />
       <div className="mb-6 grid gap-4 sm:grid-cols-2">
@@ -255,7 +259,7 @@ export default function Schedules() {
                 <TableHead>{t("When")}</TableHead>
                 <TableHead className="hidden md:table-cell">{t("Next run")}</TableHead>
                 <TableHead className="hidden lg:table-cell">{t("Last run")}</TableHead>
-                <TableHead className="text-right">{t("Actions")}</TableHead>
+                {edit && <TableHead className="text-right">{t("Actions")}</TableHead>}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -265,6 +269,7 @@ export default function Schedules() {
                     <Switch
                       checked={s.enabled}
                       onCheckedChange={() => toggle.mutate(s)}
+                      disabled={!edit}
                       aria-label={t("Enabled")}
                     />
                   </TableCell>
@@ -291,38 +296,40 @@ export default function Schedules() {
                       </p>
                     )}
                   </TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title={t("Run now")}
-                        onClick={() => run.mutate(s.id)}
-                      >
-                        <Play />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title={t("Edit")}
-                        onClick={() => setEditing({ ...s })}
-                      >
-                        <Pencil />
-                      </Button>
-                      <Confirm
-                        trigger={
-                          <Button variant="ghost" size="icon" title={t("Delete")}>
-                            <Trash2 />
-                          </Button>
-                        }
-                        title={t("Delete {{name}}?", { name: s.name })}
-                        description={t("The schedule stops running immediately.")}
-                        confirm={t("Delete")}
-                        destructive
-                        onConfirm={() => del.mutate(s.id)}
-                      />
-                    </div>
-                  </TableCell>
+                  {edit && (
+                    <TableCell>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={t("Run now")}
+                          onClick={() => run.mutate(s.id)}
+                        >
+                          <Play />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title={t("Edit")}
+                          onClick={() => setEditing({ ...s })}
+                        >
+                          <Pencil />
+                        </Button>
+                        <Confirm
+                          trigger={
+                            <Button variant="ghost" size="icon" title={t("Delete")}>
+                              <Trash2 />
+                            </Button>
+                          }
+                          title={t("Delete {{name}}?", { name: s.name })}
+                          description={t("The schedule stops running immediately.")}
+                          confirm={t("Delete")}
+                          destructive
+                          onConfirm={() => del.mutate(s.id)}
+                        />
+                      </div>
+                    </TableCell>
+                  )}
                 </TableRow>
               ))}
             </TableBody>

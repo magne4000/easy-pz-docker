@@ -26,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatBytes, formatDate, formatRelative } from "@/lib/format";
+import { useCan } from "@/lib/scopes";
 
 function CreateDialog({ running }: { running: boolean }) {
   const { t } = useTranslation();
@@ -176,6 +177,7 @@ export default function Backups() {
     (id: number) => unwrap(api.POST("/backups/{id}/restore", { params: { path: { id } } })),
     { success: t("Restore started"), invalidate: [keys.server, keys.tasks] },
   );
+  const edit = useCan("backups");
   const d = q.data;
   const p = d?.policy;
   return (
@@ -185,7 +187,7 @@ export default function Backups() {
         description={t(
           "Snapshots are only taken when the world changed, so every archive is a distinct state.",
         )}
-        actions={<CreateDialog running={!!d?.status.running} />}
+        actions={edit && <CreateDialog running={!!d?.status.running} />}
       />
       <PauseEmptyWarning className="mb-6" />
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
@@ -279,52 +281,56 @@ export default function Backups() {
                       >
                         <FileText />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        title={b.pinned ? t("Unpin") : t("Pin (never prune)")}
-                        onClick={() => pin.mutate({ id: b.id, pinned: !b.pinned })}
-                      >
-                        {b.pinned ? <PinOff /> : <Pin />}
-                      </Button>
-                      <Button variant="ghost" size="icon" asChild title={t("Download")}>
-                        <a href={`/api/backups/${b.id}/download`} download>
-                          <Download />
-                        </a>
-                      </Button>
-                      <Confirm
-                        trigger={
-                          <Button variant="ghost" size="icon" title={t("Restore")}>
-                            <History />
+                      {edit && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title={b.pinned ? t("Unpin") : t("Pin (never prune)")}
+                            onClick={() => pin.mutate({ id: b.id, pinned: !b.pinned })}
+                          >
+                            {b.pinned ? <PinOff /> : <Pin />}
                           </Button>
-                        }
-                        title={t("Restore this backup?")}
-                        description={
-                          <>
-                            <p>
-                              {t(
-                                "The server is stopped (players are disconnected), the current state is backed up, then this snapshot replaces the world, the account database and the server config.",
-                              )}
-                            </p>
-                            <p className="mt-2 font-medium">{formatDate(b.createdAt)}</p>
-                          </>
-                        }
-                        confirm={t("Restore")}
-                        destructive
-                        onConfirm={() => restore.mutate(b.id)}
-                      />
-                      <Confirm
-                        trigger={
-                          <Button variant="ghost" size="icon" title={t("Delete")}>
-                            <Trash2 />
+                          <Button variant="ghost" size="icon" asChild title={t("Download")}>
+                            <a href={`/api/backups/${b.id}/download`} download>
+                              <Download />
+                            </a>
                           </Button>
-                        }
-                        title={t("Delete this backup?")}
-                        description={t("The archive is removed from disk. This cannot be undone.")}
-                        confirm={t("Delete")}
-                        destructive
-                        onConfirm={() => del.mutate(b.id)}
-                      />
+                          <Confirm
+                            trigger={
+                              <Button variant="ghost" size="icon" title={t("Restore")}>
+                                <History />
+                              </Button>
+                            }
+                            title={t("Restore this backup?")}
+                            description={
+                              <>
+                                <p>
+                                  {t(
+                                    "The server is stopped (players are disconnected), the current state is backed up, then this snapshot replaces the world, the account database and the server config.",
+                                  )}
+                                </p>
+                                <p className="mt-2 font-medium">{formatDate(b.createdAt)}</p>
+                              </>
+                            }
+                            confirm={t("Restore")}
+                            destructive
+                            onConfirm={() => restore.mutate(b.id)}
+                          />
+                          <Confirm
+                            trigger={
+                              <Button variant="ghost" size="icon" title={t("Delete")}>
+                                <Trash2 />
+                              </Button>
+                            }
+                            title={t("Delete this backup?")}
+                            description={t("The archive is removed from disk. This cannot be undone.")}
+                            confirm={t("Delete")}
+                            destructive
+                            onConfirm={() => del.mutate(b.id)}
+                          />
+                        </>
+                      )}
                     </div>
                   </TableCell>
                 </TableRow>

@@ -19,7 +19,7 @@ import { useTranslation } from "react-i18next";
 import { NavLink } from "react-router-dom";
 import { api } from "@/api/client";
 import { keys } from "@/api/keys";
-import { useServerStatus, useSystem } from "@/api/queries";
+import { useServerStatus, useSession, useSystem } from "@/api/queries";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -100,6 +100,7 @@ export function Layout({ children, connection }: { children: ReactNode; connecti
   const qc = useQueryClient();
   const status = useServerStatus();
   const system = useSystem();
+  const username = useSession().data?.username;
   const [open, setOpen] = useState(false);
 
   const logout = async () => {
@@ -178,6 +179,14 @@ export function Layout({ children, connection }: { children: ReactNode; connecti
           <div className="ml-auto flex items-center gap-2">
             <Connection state={connection} />
             <ThemeToggle />
+            {username && (
+              <span
+                className="text-muted-foreground hidden max-w-40 truncate text-xs sm:inline"
+                title={username}
+              >
+                {username}
+              </span>
+            )}
             <Button variant="ghost" size="icon" onClick={logout} aria-label={t("Log out")}>
               <LogOut className="size-4" />
             </Button>

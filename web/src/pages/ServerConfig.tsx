@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { useCan } from "@/lib/scopes";
 import { cn } from "@/lib/utils";
 
 type Entry = Schemas["IniEntryView"];
@@ -22,7 +23,17 @@ function kindOf(value: string): "bool" | "number" | "text" {
   return "text";
 }
 
-function Field({ entry, value, onChange }: { entry: Entry; value: string; onChange: (v: string) => void }) {
+function Field({
+  entry,
+  value,
+  readOnly,
+  onChange,
+}: {
+  entry: Entry;
+  value: string;
+  readOnly: boolean;
+  onChange: (v: string) => void;
+}) {
   const kind = kindOf(entry.value);
   if (entry.managed) {
     return (
@@ -34,6 +45,7 @@ function Field({ entry, value, onChange }: { entry: Entry; value: string; onChan
       <Switch
         checked={value === "true"}
         onCheckedChange={(v) => onChange(v ? "true" : "false")}
+        disabled={readOnly}
         aria-label={entry.key}
       />
     );
@@ -44,6 +56,7 @@ function Field({ entry, value, onChange }: { entry: Entry; value: string; onChan
       inputMode={kind === "number" ? "decimal" : undefined}
       type={/password/i.test(entry.key) ? "password" : "text"}
       className={cn("font-mono text-xs", kind === "number" && "max-w-40")}
+      readOnly={readOnly}
       onChange={(e) => onChange(e.target.value)}
     />
   );
@@ -71,6 +84,7 @@ export default function ServerConfig() {
     );
   }, [entries, filter]);
   const running = status.data?.state === "running";
+  const edit = useCan("config");
   const commit = (reload: boolean) => save.mutate(reload, { onSuccess: reset });
 
   return (
@@ -86,19 +100,23 @@ export default function ServerConfig() {
               onChange={(e) => setFilter(e.target.value)}
               className="w-56"
             />
-            <Button variant="outline" disabled={!dirty} onClick={reset}>
-              <RotateCcw /> {t("Discard")}
-            </Button>
-            <Button variant="outline" disabled={!dirty || save.isPending} onClick={() => commit(false)}>
-              <Save /> {t("Save")}
-            </Button>
-            <Button
-              disabled={!dirty || !running || save.isPending}
-              onClick={() => commit(true)}
-              title={t("Save, then run reloadoptions on the running server")}
-            >
-              {t("Save & reload")}
-            </Button>
+            {edit && (
+              <>
+                <Button variant="outline" disabled={!dirty} onClick={reset}>
+                  <RotateCcw /> {t("Discard")}
+                </Button>
+                <Button variant="outline" disabled={!dirty || save.isPending} onClick={() => commit(false)}>
+                  <Save /> {t("Save")}
+                </Button>
+                <Button
+                  disabled={!dirty || !running || save.isPending}
+                  onClick={() => commit(true)}
+                  title={t("Save, then run reloadoptions on the running server")}
+                >
+                  {t("Save & reload")}
+                </Button>
+              </>
+            )}
           </>
         }
       />
@@ -129,7 +147,12 @@ export default function ServerConfig() {
                 )
               }
             >
-              <Field entry={e} value={edits[e.key] ?? e.value} onChange={(v) => set(e.key, e.value, v)} />
+              <Field
+                entry={e}
+                value={edits[e.key] ?? e.value}
+                readOnly={!edit}
+                onChange={(v) => set(e.key, e.value, v)}
+              />
             </SettingRow>
           ))}
           {shown.length === 0 && (

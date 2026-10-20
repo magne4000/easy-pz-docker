@@ -2,13 +2,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useMatch } from "react-router-dom";
 import { onUnauthorized } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSession } from "@/api/queries";
 import { Layout } from "@/components/Layout";
 import { type ConnectionState, connectEvents } from "@/events";
 import { Login } from "@/pages/Login";
+import { PelicanHandoff } from "@/pages/PelicanHandoff";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Console = lazy(() => import("@/pages/Console"));
@@ -67,7 +68,10 @@ function Authenticated() {
 export function App() {
   const qc = useQueryClient();
   const session = useSession();
+  // Pelican's sign-in handoff works whether or not a session exists yet.
+  const handoff = useMatch("/auth/pelican");
   useEffect(() => onUnauthorized(() => qc.invalidateQueries({ queryKey: keys.session })), [qc]);
+  if (handoff) return <PelicanHandoff />;
   if (session.isPending) return session.failureCount > 0 ? <WaitingForBackend /> : <Spinner />;
   if (!session.data?.authenticated) return <Login />;
   return <Authenticated />;

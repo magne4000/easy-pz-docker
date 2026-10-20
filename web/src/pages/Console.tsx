@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { useCan } from "@/lib/scopes";
 import { cn } from "@/lib/utils";
 
 const QUICK = ["players", "save", "help", "showoptions"];
@@ -111,6 +112,7 @@ export default function Console() {
   };
 
   const running = status.data?.state === "running";
+  const rcon = useCan("console");
 
   return (
     <div className="flex h-[calc(100svh-7.5rem)] flex-col md:h-[calc(100svh-9.5rem)]">
@@ -176,44 +178,46 @@ export default function Console() {
           <Button
             size="sm"
             variant="secondary"
-            className="absolute right-4 bottom-20"
+            className={cn("absolute right-4", rcon ? "bottom-20" : "bottom-4")}
             onClick={() => setFollow(true)}
           >
             <ArrowDown /> {t("Follow")}
           </Button>
         )}
-        <div className="border-t p-3">
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            {QUICK.map((q) => (
-              <Button
-                key={q}
-                size="sm"
-                variant="outline"
-                className="h-7 font-mono text-xs"
+        {rcon && (
+          <div className="border-t p-3">
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {QUICK.map((q) => (
+                <Button
+                  key={q}
+                  size="sm"
+                  variant="outline"
+                  className="h-7 font-mono text-xs"
+                  disabled={!running}
+                  onClick={() => run(q)}
+                >
+                  {q}
+                </Button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Input
+                value={command}
+                onChange={(e) => setCommand(e.target.value)}
+                onKeyDown={onKey}
                 disabled={!running}
-                onClick={() => run(q)}
-              >
-                {q}
+                placeholder={
+                  running ? t('RCON command, e.g. servermsg "hello"') : t("The server is not running")
+                }
+                className="font-mono"
+                autoComplete="off"
+              />
+              <Button onClick={() => run(command)} disabled={!running || !command.trim() || exec.isPending}>
+                <Send /> {t("Send")}
               </Button>
-            ))}
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Input
-              value={command}
-              onChange={(e) => setCommand(e.target.value)}
-              onKeyDown={onKey}
-              disabled={!running}
-              placeholder={
-                running ? t('RCON command, e.g. servermsg "hello"') : t("The server is not running")
-              }
-              className="font-mono"
-              autoComplete="off"
-            />
-            <Button onClick={() => run(command)} disabled={!running || !command.trim() || exec.isPending}>
-              <Send /> {t("Send")}
-            </Button>
-          </div>
-        </div>
+        )}
       </Card>
     </div>
   );
