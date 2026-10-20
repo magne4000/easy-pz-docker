@@ -233,7 +233,7 @@ class EasyPzPage extends Page
                 $this->entry('installed_build', $updates['installedBuild'] ?? null),
                 $this->entry('latest_build', $updates['latestBuild'] ?? null)
                     ->badge(fn () => (bool) ($updates['gameUpdateAvailable'] ?? false))
-                    ->color('warning'),
+                    ->color(fn () => ($updates['gameUpdateAvailable'] ?? false) ? 'warning' : null),
                 $this->entry('game_locked', isset($updates['gameLocked']) ? trans($updates['gameLocked'] ? 'easy-pz::strings.status.yes' : 'easy-pz::strings.status.no') : null),
                 $this->entry('last_checked', $this->since($updates['lastCheckedAt'] ?? null, false) ?: null),
                 $this->entry('window', $this->windowText($window))->badge()
