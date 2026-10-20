@@ -79,8 +79,14 @@ exited() { [[ $(container_state "$1") == exited* ]]; }
 logs_since() { docker logs --since "$2" "$1" 2>&1; }
 # grep -c reads everything: with pipefail, grep -q would SIGPIPE docker logs.
 in_logs_since() { logs_since "$1" "$2" | grep -c -- "$3" >/dev/null; }
+# The container exited after $2 (a container stopped earlier does not count).
+exited_since() {
+  local finished
+  finished=$(docker inspect -f '{{.State.FinishedAt}}' "$1" 2>/dev/null) || return 1
+  exited "$1" && [[ $finished > "$2" ]]
+}
 # SERVER STARTED printed, or the container already gave up.
-started_or_exited() { in_logs_since "$1" "$2" "SERVER STARTED" || exited "$1"; }
+started_or_exited() { in_logs_since "$1" "$2" "SERVER STARTED" || exited_since "$1" "$2"; }
 crashes() { root cat "$ROOT/wings/logs/wings.log" 2>/dev/null | grep -c 'crashed state'; }
 
 # Files under ROOT belong to Wings' user and the panel's: read them as root.
