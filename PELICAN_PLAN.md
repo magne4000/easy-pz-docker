@@ -463,7 +463,8 @@ from a URL with a path prefix.
     to that port.
 - [x] Enable (warns first when the server has no memory limit: no heap to
       derive, and the stock egg's install is capped at 1024 MiB):
-  1. generate the secret; write `.easy-pz/pzman.env` (`putContent`);
+  1. generate the server's Ed25519 keypair (or reuse the stored one); write
+     `.easy-pz/pzman.env` with the public key (`putContent`);
   2. download the pinned `pzman-linux-amd64` in the panel, verify it against
      `pzman-SHA256SUMS`, `putContent` it to `.easy-pz/pzman`, `chmodFiles` 0755
      (Wings' `pull` cannot verify a checksum);
