@@ -2,7 +2,9 @@
 
 namespace Magne4000\EasyPz\Providers;
 
+use App\Http\Middleware\RequireTwoFactorAuthentication;
 use Illuminate\Foundation\Support\Providers\RouteServiceProvider;
+use Illuminate\Session\Middleware\AuthenticateSession;
 use Illuminate\Support\Facades\Route;
 use Magne4000\EasyPz\Http\Controllers\HandoffController;
 use Magne4000\EasyPz\Http\Controllers\PublicProxyController;
@@ -13,7 +15,10 @@ class EasyPzRoutesProvider extends RouteServiceProvider
     public function boot(): void
     {
         $this->routes(function () {
-            Route::middleware(['web', 'auth'])
+            // The panel pages' own checks (Pelican's PanelProvider): a session
+            // ended by a password change, or a user who must set up 2FA first,
+            // gets no pzman session either.
+            Route::middleware(['web', 'auth', AuthenticateSession::class, RequireTwoFactorAuthentication::class])
                 ->get('/easy-pz/{uuidShort}/open', HandoffController::class)
                 ->name('easy-pz.open');
 
