@@ -164,14 +164,17 @@ func (p *Process) Start(ctx context.Context) error {
 }
 
 func (p *Process) spawn(ctx context.Context) error {
-	script := filepath.Join(p.o.InstallDir, "start-server.sh")
-	st, err := os.Stat(script)
+	bin, env, err := startCommand(p.o.InstallDir, os.Getenv)
 	if err != nil {
-		return fmt.Errorf("start-server.sh not found (is the game installed?): %w", err)
+		return err
+	}
+	st, err := os.Stat(bin)
+	if err != nil {
+		return err
 	}
 	if st.Mode().Perm()&0o111 != 0o111 {
-		if err := os.Chmod(script, st.Mode().Perm()|0o755); err != nil {
-			return fmt.Errorf("chmod start-server.sh: %w", err)
+		if err := os.Chmod(bin, st.Mode().Perm()|0o755); err != nil {
+			return fmt.Errorf("chmod %s: %w", filepath.Base(bin), err)
 		}
 	}
 	args := []string{"-cachedir=" + p.o.DataDir, "-servername", p.o.ServerName}
@@ -184,8 +187,8 @@ func (p *Process) spawn(ctx context.Context) error {
 	}
 	var stdin io.WriteCloser
 	// Not ctx: the server outlives the request that started it.
-	proc, err := sys.Proc{Name: "start server", Bin: script, Args: args, Dir: p.o.InstallDir, Home: p.o.DataDir,
-		UID: p.o.UID, GID: p.o.GID, Stdin: &stdin}.Start(context.Background())
+	proc, err := sys.Proc{Name: "start server", Bin: bin, Args: args, Dir: p.o.InstallDir, Home: p.o.DataDir,
+		UID: p.o.UID, GID: p.o.GID, Env: env, Stdin: &stdin}.Start(context.Background())
 	if err != nil {
 		return err
 	}
@@ -195,7 +198,7 @@ func (p *Process) spawn(ctx context.Context) error {
 	p.cmd, p.stdin, p.exited = cmd, stdin, exited
 	p.mu.Unlock()
 	p.setState(StateStarting, func(s *Status) { s.PID = cmd.Process.Pid; s.StartedAt = time.Now().UTC() })
-	p.o.Log.Info("server process started", "pid", cmd.Process.Pid, "args", strings.Join(args, " "))
+	p.o.Log.Info("server process started", "pid", cmd.Process.Pid, "bin", filepath.Base(bin), "args", strings.Join(args, " "))
 
 	go func() {
 		sc := bufio.NewScanner(pr)
