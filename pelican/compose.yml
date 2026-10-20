@@ -1,0 +1,94 @@
+# Pelican panel + Wings in one compose project, for easy-pz's Pelican plugin.
+# Game servers run as sibling containers created by Wings through the host's
+# Docker socket.
+#
+# Before `docker compose up -d`, replace the placeholders:
+#   192.168.1.10        the host's LAN address (panel URL and Wings' address)
+#   magne@example.com   the first admin's email
+#   change-me           the first admin's password (used on the first run only)
+# and, if your data lives elsewhere, /mnt/apps/docker/pelican everywhere.
+# init.sh must sit next to this file.
+name: pelican
+
+services:
+  # One-shot: migrations, first admin, the local node, Wings' config.
+  init:
+    container_name: pelican-init
+    command: [sh, /init.sh]
+    environment:
+      # same as panel
+      - XDG_DATA_HOME=/pelican-data
+      - APP_URL=http://192.168.1.10:16264 # PLACEHOLDER: host address
+      - APP_INSTALLED=true
+      - DB_CONNECTION=sqlite
+      - CACHE_STORE=file
+      - SESSION_DRIVER=file
+      - QUEUE_CONNECTION=database
+      # init only
+      - PELICAN_ROOT=/mnt/apps/docker/pelican/wings
+      - PANEL_ADMIN_USER=magne
+      - PANEL_ADMIN_EMAIL=magne@example.com # PLACEHOLDER
+      - PANEL_ADMIN_PASSWORD=change-me # PLACEHOLDER
+      - WINGS_FQDN=192.168.1.10 # PLACEHOLDER: host address
+      - WINGS_PORT=16265
+      - WINGS_SFTP_PORT=2022
+    image: ghcr.io/pelican/panel:v1.0.0-rc.1
+    restart: "no"
+    user: "0:0" # writes Wings' config, then hands the panel data to www-data
+    volumes:
+      - ./init.sh:/init.sh:ro
+      - /mnt/apps/docker/pelican/panel:/pelican-data
+      - /mnt/apps/docker/pelican/wings:/mnt/apps/docker/pelican/wings
+
+  panel:
+    container_name: pelican-panel
+    depends_on:
+      init: { condition: service_completed_successfully }
+    environment:
+      - XDG_DATA_HOME=/pelican-data
+      - APP_URL=http://192.168.1.10:16264 # PLACEHOLDER: host address
+      - BEHIND_PROXY=true # Caddy serves plain HTTP on :80, whatever the APP_URL port
+      # The web installer is skipped: the drivers it defaults to.
+      - APP_INSTALLED=true
+      - DB_CONNECTION=sqlite
+      - CACHE_STORE=file
+      - SESSION_DRIVER=file
+      - QUEUE_CONNECTION=database
+    image: ghcr.io/pelican/panel:v1.0.0-rc.1
+    ports:
+      - 16264:80/tcp
+    restart: unless-stopped
+    volumes:
+      - /mnt/apps/docker/pelican/panel:/pelican-data
+      # Plugins live outside /pelican-data in the image: without this mount
+      # they are lost whenever the container is recreated.
+      - /mnt/apps/docker/pelican/panel/plugins:/var/www/html/plugins
+
+  wings:
+    container_name: pelican-wings
+    command: [/usr/bin/wings, --config, /mnt/apps/docker/pelican/wings/config.yml]
+    depends_on:
+      init: { condition: service_completed_successfully }
+    environment:
+      - WINGS_UID=568
+      - WINGS_GID=568
+      - WINGS_USERNAME=pelican
+      - TZ=Europe/Paris
+    image: ghcr.io/pelican/wings:v1.0.0-rc.1
+    ports:
+      - 16265:8080/tcp
+      - 2022:2022/tcp
+    restart: unless-stopped
+    tty: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Wings hands its own paths to the host daemon as bind sources:
+      # this directory must have the same path on both sides.
+      - /mnt/apps/docker/pelican/wings:/mnt/apps/docker/pelican/wings
+      - /mnt/apps/docker/pelican/backups:/backups
+
+networks:
+  default:
+    ipam:
+      # Away from 172.18.0.0/16, which Wings takes for its game network.
+      config: [{ subnet: 172.20.0.0/16 }]

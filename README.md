@@ -19,6 +19,7 @@ backups, scheduling and the web UI.
 - **Server config**: structured editor for the server `.ini`, with *save & reload*.
 - **Sandbox options**: structured editor for `<server>_SandboxVars.lua` with ranges, defaults and choices. Enabled mods' options appear like in the game's sandbox editor: on the mod's page, with its translated names, tooltips and choices (from the mod's `sandbox-options.txt` and English `Sandbox.json`), including options the server has not written to the file yet. Changes apply at the next start.
 - **Launcher** (non-Steam servers): syncs mods and joins the server, with a Steam or non-Steam copy of the game. See [Launcher](#launcher).
+- **Pelican**: also runs as an add-on to the stock Project Zomboid egg of the Pelican panel, with Pelican's logins and permissions. See [Pelican](#pelican).
 
 ## Running it
 
@@ -105,6 +106,183 @@ The mod page runs at most 4 downloads at once per client address; the
 launcher waits for a free one. Without `PANEL_TRUSTED_PROXIES`, every player
 behind the proxy shares the proxy's address, and these 4 downloads.
 
+## Pelican
+
+Instead of the compose image, easy-pz can run inside a [Pelican](https://pelican.dev)
+server made from the stock Project Zomboid egg (`pelican-eggs/games-steamcmd`).
+A Pelican plugin deploys `pzman` into the server; Pelican's logins and
+permissions replace the panel password, and players reach the mod page through
+the panel's URL. The egg's layout stays: the game in the server folder, the
+Zomboid data in `.cache/`, and pzman with its database, backups and logs in
+`.easy-pz/`.
+
+### Requirements
+
+- An **x86-64** node: the egg's game image is amd64-only.
+- Pelican panel and Wings **1.0.0-rc.1** or later.
+- A **memory limit** on the PZ server (6144 MiB is a good start). pzman sizes
+  the JVM heap from it: 75 %, rounded down to whole GiB (6144 MiB → 4 GiB).
+  Without a limit the heap falls back to 8 GiB, and Wings caps the egg's
+  install at 1024 MiB: SteamCMD is killed halfway through the download and the
+  egg still reports a complete install.
+- **Three allocations**: the game port (primary), the one set in the egg's
+  `STEAM_PORT` variable, and one TCP port for easy-pz's web UI, which Pelican
+  users' browsers open (players don't need it).
+
+### The stack
+
+[`pelican/compose.yml`](pelican/compose.yml) runs the panel and Wings in one
+compose project (panel on 16264, Wings on 16265, SFTP on 2022);
+[`pelican/init.sh`](pelican/init.sh), next to it, creates the first admin, the
+local node and Wings' config on the first `docker compose up`. Replace the
+placeholders marked in the file: the host address `192.168.1.10`, the admin's
+email and password.
+
+It mounts `panel/plugins` on the panel's `/var/www/html/plugins`: the panel
+image keeps plugins outside its data volume, so without that mount they vanish
+whenever the container is recreated.
+
+### Installing the plugin
+
+From a release: *Admin → Plugins → Import from URL* with
+`https://github.com/magne4000/easy-pz-docker/releases/latest/download/easy-pz-pelican-plugin.zip`
+(or download it and *Import from File*), then *Install*. From a checkout:
+
+```sh
+cp -r pelican-plugin/easy-pz /mnt/apps/docker/pelican/panel/plugins/
+chown -R 82:82 /mnt/apps/docker/pelican/panel/plugins/easy-pz   # the panel's www-data
+docker exec pelican-panel php artisan p:plugin:install easy-pz
+```
+
+The plugin follows the latest release: the plugin list offers *Update* when
+there is a new one. Each plugin release pins the pzman of the same version;
+servers keep the pzman they run until an admin clicks *Upgrade* on their
+*Easy PZ* page. The plugin's settings hold the number of mod pack downloads the
+panel proxies at once (5 by default; each takes one of the panel's 15 PHP
+workers) and a pzman download URL for development builds.
+
+### Enabling easy-pz on a server
+
+1. Add `easy_pz` to the egg's *Features* (*Admin → Eggs → Project Zomboid*).
+   Only servers of eggs with this feature get the *Easy PZ* page. Enable
+   refuses an egg that no longer looks like the stock one (stop command
+   `quit`, `-cachedir=/home/container/.cache` in its startup, app 380870).
+2. Create the server with a memory limit and the three allocations, and let
+   the install finish.
+3. On the server's *Easy PZ* page, pick the UI allocation and click *Enable*.
+   The plugin writes `.easy-pz/pzman.env`, downloads pzman, checks it against
+   the release's `pzman-SHA256SUMS`, sets the startup command to
+   `./.easy-pz/pzman` and `AUTO_UPDATE` to 0 (pzman updates the game itself, in
+   update windows and respecting *Lock game version*), then restarts the server.
+
+pzman takes the egg's variables (`SERVER_NAME`, `ADMIN_USER`,
+`ADMIN_PASSWORD`, `MAX_PLAYERS`, the game port, `STEAM_PORT`, `SRCDS_BETAID`)
+and reads any other variable of [Environment](#environment) from the server's
+environment: to set one (`USE_STEAM=false` for a non-Steam server,
+`SERVER_PASSWORD`, `VM_ARGS`, `MEMORY_XMX_GB`…), add it to the egg as a
+variable (*Egg Variables* tab) and give it a value per server. `PUID`/`PGID`
+and the panel password variables don't apply.
+
+### What changes for users
+
+- *Open easy-pz* on the *Easy PZ* page opens easy-pz in a new tab, signed in
+  as the Pelican user: no password (password login is off). The session lasts
+  an hour, then renews itself through the panel, so a removed permission
+  applies within the hour. The page itself shows the status and the common
+  actions: check for updates, update window, restart with countdown, save,
+  broadcast, backup.
+- The owner and admins can do everything; subusers get what is ticked in the
+  *Easy PZ* group of the subuser editor:
+  - `easy-pz.read`: the *Easy PZ* page and easy-pz, read-only;
+  - `easy-pz.control`: restart, save, broadcast, cancel operations; check for
+    updates, open or cancel update windows;
+  - `easy-pz.console`: send console commands from easy-pz;
+  - `easy-pz.mods`: add, remove, enable, order and upload mods;
+  - `easy-pz.config`: edit the server `.ini` (RCON password included) and the
+    sandbox options;
+  - `easy-pz.backups`: create, restore, pin, delete and download backups;
+  - `easy-pz.schedules`: create, edit, run and delete schedules (a schedule
+    that restarts, saves or broadcasts also needs `control`; one that backs up,
+    `backups`);
+  - `easy-pz.settings`: change easy-pz's settings.
+- Pelican's console is the game's: its output plus `[steamcmd]` and `[pzman]`
+  lines, and commands typed there (`players`, `save`…) go to the game.
+  pzman's own log is `.easy-pz/logs/pzman.log`.
+- Start, Stop and Restart are Pelican's: Stop saves the world and stops the
+  game. easy-pz has no Stop button and no `stop` schedule. Its own restarts
+  (update windows, schedules) happen inside the container, so Pelican keeps
+  showing the server running meanwhile.
+- Pelican backups hold the world, the config and pzman's database: a managed
+  block in `.pelicanignore` leaves out the game install, SteamCMD and
+  easy-pz's own backups, cache and logs.
+- The player mod page is `<panel URL>/easy-pz/<server id>/mods/<token>/`, where
+  `<server id>` is the 8-character id in the server's panel URL; easy-pz's
+  *Settings* shows the full link. Players open it and paste it into the
+  launcher, which joins `<node address>:<game port>`. Downloads go through the
+  panel; beyond its limit of concurrent downloads, the launcher waits for a
+  free one.
+
+### The shared-hostname warning
+
+Browsers send cookies by hostname, not by port. When the panel and the node
+share a hostname (both `192.168.1.10` in the compose above), opening easy-pz
+sends the panel's session cookie to pzman's port, and whoever controls the
+server's files (its owner can replace `.easy-pz/pzman`) could capture the
+panel session of an admin who opens easy-pz. Root admins see a warning on the
+*Easy PZ* page. To avoid it, give the panel and the node different hostnames
+(e.g. `APP_URL=http://pelican.home.lan:16264` and `WINGS_FQDN=192.168.1.10`),
+or set *Admin → UI address* to another hostname, such as a reverse proxy in
+front of easy-pz.
+
+### Migrating from the compose deployment
+
+1. Create the Pelican server as above, with the compose's `SERVER_NAME`, and
+   allocations 16261 (primary) and 16262 (`STEAM_PORT`): the server `.ini`
+   keeps the ports it has (pzman only fills in missing ones). For
+   `USE_STEAM=false`, add `USE_STEAM` to the egg (see above); for
+   `MEMORY_XMX_GB: "8"`, give the server 11264 MiB or add `MEMORY_XMX_GB`.
+   Let the install finish; don't enable easy-pz yet.
+2. Stop the compose container: `docker compose stop projectzomboid` (pzman
+   saves and quits).
+3. Copy the volumes into the server folder, as root (the UUID is on the
+   server's admin page):
+
+   ```sh
+   old=/mnt/apps/docker/zomboid
+   new=/mnt/apps/docker/pelican/wings/volumes/<server UUID>
+   cp -a "$old/files/." "$new/"                 # the game and its Workshop downloads, over the egg's install
+   mkdir -p "$new/.cache" "$new/.easy-pz"
+   cp -a "$old/data/." "$new/.cache/"           # Server/, Saves/, db/, mods/
+   mv "$new/.cache"/pzman.db* "$new/.easy-pz/"  # pzman's database
+   cp -a "$old/backups" "$new/.easy-pz/backups"
+   chown -R 568:568 "$new"                      # WINGS_UID:WINGS_GID
+   ```
+
+4. Enable easy-pz on the *Easy PZ* page.
+
+Mods, load order, settings, schedules, the mod page token and the backups
+(listed and restorable) carry over. The mod links in `.cache/mods/` still point
+into `/project-zomboid`: pzman relinks them before the first start. Players
+need the new mod page link.
+
+### Disabling
+
+*Admin → Disable easy-pz* on the *Easy PZ* page gives the egg its startup
+command and `AUTO_UPDATE` back; the stock egg runs from the next start. The
+world and `.easy-pz/` (database, backups, mod cache) stay: enabling again
+resumes.
+
+### Limitations
+
+- The stock PZ egg on x86-64 only.
+- Pelican's plugin system is young (panel 1.0.0-rc.1): a panel upgrade may need
+  a plugin update.
+- Updating the egg from its URL removes the `easy_pz` feature and the variables
+  you added: add them again.
+- Each proxied download holds one of the panel's PHP workers, hence the limit
+  on concurrent downloads; players beyond it queue.
+- easy-pz's UI port must be reachable by Pelican users' browsers.
+
 ## Launcher
 
 `launcher/` is a desktop app for players of a **non-Steam** server
@@ -149,6 +327,7 @@ server's public mod page is at `http://localhost:5173/mods/dev-token/`.
 | `make build` | UI build embedded into a static `pzman` |
 | `docker build -f docker/Dockerfile .` | the image (linux/amd64) |
 | `make launcher-dev` / `launcher-build` / `launcher-test` / `launcher-gen` | the launcher (needs `wails3`) |
+| `pelican/e2e.sh` | Pelican end-to-end test with the real game, x86-64 only (CI: workflow `pelican-e2e`, on demand or on PRs labelled `pelican-e2e`) |
 
 Layout: `cmd/pzman` (entry, `pzman openapi`), `internal/boot` (wiring, boot
 order, shutdown), `internal/httpapi` (Fiber + Huma, auth, SSE, public page),
@@ -156,4 +335,5 @@ order, shutdown), `internal/httpapi` (Fiber + Huma, auth, SSE, public page),
 `internal/pz` (ini/launch codecs, supervisor, RCON), `internal/steam`,
 `internal/mods`, `internal/backup`, `internal/sys`, `internal/store`,
 `internal/devfake`, `web/` (React 19 + Tailwind 4 + shadcn/ui),
-`launcher/` (Wails v3, its own Go module).
+`launcher/` (Wails v3, its own Go module), `pelican-plugin/easy-pz` (the
+Pelican plugin, PHP), `pelican/` (Pelican stack and end-to-end test).

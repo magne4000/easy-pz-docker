@@ -39,6 +39,7 @@ web/node_modules/
 .dev/
 web/dist/
 *.tsbuildinfo
+/e2e-out/
 
 # Local copies of game files used as reference (not redistributable)
 /projectzomboid.jar
