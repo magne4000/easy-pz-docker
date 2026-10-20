@@ -24,6 +24,7 @@ use Magne4000\EasyPz\Services\PzmanClient;
 use Magne4000\EasyPz\Services\PzmanException;
 use Magne4000\EasyPz\Support\Scopes;
 use Magne4000\EasyPz\Support\Urls;
+use Magne4000\EasyPz\Support\Version;
 
 class EasyPzPage extends Page
 {
@@ -182,14 +183,14 @@ class EasyPzPage extends Page
         }
 
         $pinned = EasyPzService::pinnedVersion();
-        if (self::isRootAdmin() && $ez->deployed_version !== $pinned) {
+        if (self::isRootAdmin() && !Version::same($ez->deployed_version, $pinned)) {
             $components[] = Callout::make(trans('easy-pz::strings.page.upgrade_available', ['version' => $pinned]))
                 ->description(trans('easy-pz::strings.page.upgrade_available_help', ['deployed' => $ez->deployed_version ?? '?']))
                 ->info();
         }
 
         $running = $this->system['version'] ?? null;
-        if (self::isRootAdmin() && $running !== null && $ez->deployed_version !== null && $running !== $ez->deployed_version) {
+        if (self::isRootAdmin() && $running !== null && $ez->deployed_version !== null && !Version::same($running, $ez->deployed_version)) {
             $components[] = Callout::make(trans('easy-pz::strings.page.restart_to_apply', ['running' => $running, 'deployed' => $ez->deployed_version]))
                 ->warning();
         }
@@ -488,7 +489,7 @@ class EasyPzPage extends Page
             ->grouped()
             ->label(fn () => trans('easy-pz::strings.actions.upgrade', ['version' => EasyPzService::pinnedVersion()]))
             ->icon('tabler-arrow-big-up-lines')
-            ->visible(fn () => $this->enabled()?->deployed_version !== EasyPzService::pinnedVersion())
+            ->visible(fn () => !Version::same($this->enabled()?->deployed_version, EasyPzService::pinnedVersion()))
             ->modalDescription(trans('easy-pz::strings.actions.upgrade_help'))
             ->schema([
                 Toggle::make('restart')->label(trans('easy-pz::strings.actions.restart_now'))->default(true),
