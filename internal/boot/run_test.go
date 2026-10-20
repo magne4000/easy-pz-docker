@@ -109,8 +109,9 @@ func runPelican(t *testing.T, drivers string) *pelicanRun {
 	require.NoError(t, ln.Close())
 	for k, v := range map[string]string{
 		"PZMAN_HOST": "pelican", "PANEL_DRIVERS": drivers, "PANEL_PORT": strconv.Itoa(port), "USE_STEAM": "false",
-		"PANEL_ADMIN_PASSWORD_HASH": "$2a$12$45hHE890y/mv2tk0eXypde2z/XAtr24o8eHt/SMRdUkZhjoYU5Qs.",
-		"PANEL_INSTALL_DIR":         root, "PANEL_DATA_DIR": filepath.Join(root, ".cache"),
+		"PZMAN_PELICAN_SERVER": "9c3b6a3e-2f1d-4f6e-9a51-0d2b8c7e4a10", "PZMAN_PELICAN_PANEL_URL": "https://panel.example.com",
+		"PZMAN_PELICAN_PUBLIC_KEY": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+		"PANEL_INSTALL_DIR":        root, "PANEL_DATA_DIR": filepath.Join(root, ".cache"),
 		"PANEL_DB_PATH": filepath.Join(root, ".easy-pz", "pzman.db"), "PANEL_BACKUP_DIR": filepath.Join(root, ".easy-pz", "backups"),
 		"PANEL_CACHE_DIR": filepath.Join(root, ".easy-pz", "cache"), "PANEL_STEAM_HOME": filepath.Join(root, ".easy-pz", "steam"),
 		"PANEL_LOG_DIR": filepath.Join(root, ".easy-pz", "logs"), "PANEL_STEAMCMD": filepath.Join(root, "steamcmd", "steamcmd.sh"),

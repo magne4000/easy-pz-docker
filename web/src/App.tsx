@@ -2,13 +2,15 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Route, Routes } from "react-router-dom";
+import { Route, Routes, useMatch } from "react-router-dom";
 import { onUnauthorized } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSession } from "@/api/queries";
+import { sessionToken, startRenewal } from "@/api/session";
 import { Layout } from "@/components/Layout";
 import { type ConnectionState, connectEvents } from "@/events";
 import { Login } from "@/pages/Login";
+import { PelicanHandoff } from "@/pages/PelicanHandoff";
 
 const Dashboard = lazy(() => import("@/pages/Dashboard"));
 const Console = lazy(() => import("@/pages/Console"));
@@ -67,8 +69,21 @@ function Authenticated() {
 export function App() {
   const qc = useQueryClient();
   const session = useSession();
+  // Pelican's sign-in handoff works whether or not a session exists yet.
+  const handoff = useMatch("/auth/pelican");
   useEffect(() => onUnauthorized(() => qc.invalidateQueries({ queryKey: keys.session })), [qc]);
-  if (session.isPending) return session.failureCount > 0 ? <WaitingForBackend /> : <Spinner />;
+  // A Pelican session ends after an hour (or when pzman restarts): sign in
+  // again through the panel, which re-checks the permissions and brings the
+  // browser back to this page.
+  const s = session.data;
+  const renewing = !handoff && !!s && !s.authenticated && !!s.pelicanOpenUrl && !!sessionToken();
+  useEffect(() => {
+    if (renewing && s?.pelicanOpenUrl && !startRenewal(s.pelicanOpenUrl)) {
+      qc.invalidateQueries({ queryKey: keys.session }); // renewed moments ago: show the sign-in page
+    }
+  }, [renewing, s?.pelicanOpenUrl, qc]);
+  if (handoff) return <PelicanHandoff />;
+  if (session.isPending || renewing) return session.failureCount > 0 ? <WaitingForBackend /> : <Spinner />;
   if (!session.data?.authenticated) return <Login />;
   return <Authenticated />;
 }

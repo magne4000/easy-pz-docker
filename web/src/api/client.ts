@@ -1,5 +1,6 @@
 import createClient from "openapi-fetch";
 import type { components, paths } from "./schema";
+import { sessionToken } from "./session";
 
 export type Schemas = components["schemas"];
 
@@ -36,35 +37,56 @@ export function onUnauthorized(l: Listener) {
   };
 }
 
-// csrfFetch adds the double-submit token and, when the server lost it (e.g.
-// after a restart), fetches a fresh one and retries once.
+// Sign-in endpoints answer 401 for a bad password or link; that is no ended session.
+const signIn = /\/api\/auth\/(login|pelican)$/;
+
+// csrfFetch authenticates a request: with the Pelican session token as a
+// bearer (no CSRF: no cookie is involved), or, in Docker mode, with the
+// session cookie plus the double-submit token, fetching a fresh one and
+// retrying once when the server lost it (e.g. after a restart).
 async function csrfFetch(input: Request): Promise<Response> {
-  const unsafe = !SAFE.has(input.method);
-  const retry = unsafe ? input.clone() : null;
-  const withToken = (req: Request) => {
-    const token = csrfToken();
-    if (unsafe && token) req.headers.set(CSRF_HEADER, token);
-    return req;
-  };
-  if (unsafe && !csrfToken()) await fetch("/api/auth/session", { credentials: "same-origin" });
-  let res = await fetch(withToken(input));
-  if (res.status === 403 && retry) {
-    const body = await res
-      .clone()
-      .json()
-      .catch(() => null);
-    if (typeof body?.detail === "string" && body.detail.startsWith("CSRF")) {
-      await fetch("/api/auth/session", { credentials: "same-origin" });
-      res = await fetch(withToken(retry));
+  const bearer = sessionToken();
+  let res: Response;
+  if (bearer) {
+    input.headers.set("Authorization", `Bearer ${bearer}`);
+    res = await fetch(input);
+  } else {
+    const unsafe = !SAFE.has(input.method);
+    const retry = unsafe ? input.clone() : null;
+    const withToken = (req: Request) => {
+      const token = csrfToken();
+      if (unsafe && token) req.headers.set(CSRF_HEADER, token);
+      return req;
+    };
+    if (unsafe && !csrfToken()) await fetch("/api/auth/session", { credentials: "same-origin" });
+    res = await fetch(withToken(input));
+    if (res.status === 403 && retry) {
+      const body = await res
+        .clone()
+        .json()
+        .catch(() => null);
+      if (typeof body?.detail === "string" && body.detail.startsWith("CSRF")) {
+        await fetch("/api/auth/session", { credentials: "same-origin" });
+        res = await fetch(withToken(retry));
+      }
     }
   }
-  if (res.status === 401 && !input.url.includes("/auth/")) {
+  if (res.status === 401 && !signIn.test(new URL(input.url).pathname)) {
     for (const l of unauthorizedListeners) l();
   }
   return res;
 }
 
 export const api = createClient<paths>({ baseUrl: "/api", credentials: "same-origin", fetch: csrfFetch });
+
+// ticketed returns path with a fresh single-use ?ticket= when the session is
+// a bearer token (EventSource and download links cannot send headers), else
+// path itself: the cookie goes along.
+export async function ticketed(path: "/api/events" | `/api/backups/${number}/download`): Promise<string> {
+  if (!sessionToken()) return path;
+  const { ticket } = await unwrap(api.POST("/auth/ticket", { body: { path } }));
+  return `${path}?ticket=${encodeURIComponent(ticket)}`;
+}
 
 // unwrap turns an openapi-fetch result into data or a thrown ApiError.
 export async function unwrap<T>(p: Promise<{ data?: T; error?: unknown; response: Response }>): Promise<T> {
@@ -81,8 +103,10 @@ function send(path: string, body: FormData, onProgress?: (loaded: number, total:
   const { promise, resolve, reject } = Promise.withResolvers<XhrResult>();
   const xhr = new XMLHttpRequest();
   xhr.open("POST", `/api${path}`);
+  const bearer = sessionToken();
   const token = csrfToken();
-  if (token) xhr.setRequestHeader(CSRF_HEADER, token);
+  if (bearer) xhr.setRequestHeader("Authorization", `Bearer ${bearer}`);
+  else if (token) xhr.setRequestHeader(CSRF_HEADER, token);
   xhr.responseType = "json";
   xhr.upload.onprogress = (e) => onProgress?.(e.loaded, e.total);
   xhr.onload = () => resolve({ status: xhr.status, response: xhr.response });
@@ -98,7 +122,7 @@ export async function upload<T>(
   body: FormData,
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<T> {
-  if (!csrfToken()) await fetch("/api/auth/session", { credentials: "same-origin" });
+  if (!sessionToken() && !csrfToken()) await fetch("/api/auth/session", { credentials: "same-origin" });
   let res = await send(path, body, onProgress);
   if (res.status === 403 && (res.response as Schemas["ErrorModel"] | null)?.detail?.startsWith("CSRF")) {
     await fetch("/api/auth/session", { credentials: "same-origin" });

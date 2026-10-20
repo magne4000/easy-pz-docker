@@ -53,6 +53,15 @@ func newServerDB(t *testing.T, cfg app.Config) (*fiber.App, *store.DB) {
 }
 
 func newTestServer(t *testing.T, cfg app.Config) (*Server, *store.DB) {
+	return newTestServerLog(t, cfg, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+// stoppedSup is a game server that never runs.
+type stoppedSup struct{ pz.Supervisor }
+
+func (stoppedSup) Status() pz.Status { return pz.Status{State: pz.StateStopped} }
+
+func newTestServerLog(t *testing.T, cfg app.Config, log *slog.Logger) (*Server, *store.DB) {
 	t.Helper()
 	ctx := context.Background()
 	db, err := store.Open(ctx, slog.Default(), filepath.Join(t.TempDir(), "t.db"))
@@ -63,11 +72,15 @@ func newTestServer(t *testing.T, cfg app.Config) (*Server, *store.DB) {
 	require.NoError(t, err)
 	ring := console.NewRing(10)
 	ring.Append("hello")
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ms := mods.NewService(mods.Options{InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName,
 		DB: db, CMD: contentCMD{install: cfg.InstallDir}, Bus: bus, Log: log})
-	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms,
-		Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
+	bs := backup.NewService(backup.ServiceOptions{DB: db, Bus: bus, Log: log, Set: backup.DefaultSet(cfg.DataDir, cfg.ServerName),
+		Dir: filepath.Join(t.TempDir(), "backups"), ServerName: cfg.ServerName})
+	coord := sched.NewCoordinator(sched.Options{Cfg: cfg, Sup: stoppedSup{}, Settings: st, Bus: bus, Backups: bs, Log: log})
+	sc, err := sched.NewScheduler(coord, db, st, bus, time.UTC, nil, log)
+	require.NoError(t, err)
+	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms, Coord: coord, Backups: bs,
+		Sched: sc, Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
 	require.NoError(t, err)
 	return s, db
 }
@@ -315,7 +328,7 @@ func TestSandboxEndpoints(t *testing.T) {
 	// An enabled mod whose options the server has not written yet.
 	mod := filepath.Join(steam.WorkshopContentDir(cfg.InstallDir, "100"), "mods", "RCB", "42")
 	for name, content := range map[string]string{
-		"mod.info":                 "id=RCB\n",
+		"mod.info":                  "id=RCB\n",
 		"media/sandbox-options.txt": "VERSION = 1,\noption RCB.Mode { type = enum, numValues = 3, default = 2, page = RCB, translation = RCB_Mode, }",
 		"media/lua/shared/Translate/EN/Sandbox.json": `{"Sandbox_RCB": "Rain Cleans Blood", "Sandbox_RCB_Mode": "Mode", "Sandbox_RCB_Mode_option3": "Always"}`,
 	} {

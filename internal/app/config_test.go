@@ -69,7 +69,7 @@ func TestPublicURL(t *testing.T) {
 		require.ErrorContains(t, c.Validate(), "PANEL_PUBLIC_URL", bad)
 	}
 
-	require.Equal(t, "https://[2001:db8::1]:8443", Config{PublicURL: "https://[2001:db8::1]:8443/"}.PublicOrigin())
+	require.Equal(t, "https://[2001:db8::1]:8443", Config{PublicURL: "https://[2001:db8::1]:8443/"}.PublicBase())
 }
 
 func TestPublicGameAddress(t *testing.T) {

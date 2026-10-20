@@ -1,5 +1,5 @@
 import { Check, ChevronRight, Copy, Download, ExternalLink, Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Schemas } from "@/api/client";
 import { Badge } from "@/components/ui/badge";
@@ -26,26 +26,51 @@ export function powershellCommand(d: Pick<PublicData, "modsLine" | "mapLine" | "
   return `Copy-Item '${f}' '${f}.bak'; (Get-Content '${f}') -replace '^Mods=.*','Mods=${lit(d.modsLine)}' -replace '^WorkshopItems=.*','WorkshopItems=' -replace '^Map=.*','Map=${lit(d.mapLine)}' | Set-Content '${f}'`;
 }
 
+// copyText copies text, or, where the page may not (no Clipboard API, or the
+// sandboxed, opaque-origin page the Pelican panel serves), selects el's text
+// for the visitor to copy: "copied" or "selected".
+export async function copyText(text: string, el: HTMLElement | null): Promise<"copied" | "selected"> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return "copied";
+  } catch {
+    // no Clipboard API or no permission: select instead
+  }
+  const sel = window.getSelection();
+  if (el && sel) {
+    sel.selectAllChildren(el);
+  }
+  return "selected";
+}
+
 function CopyBlock({ text, label }: { text: string; label?: string }) {
   const { t } = useTranslation();
-  const [done, setDone] = useState(false);
+  const [done, setDone] = useState<"" | "copied" | "selected">("");
+  const pre = useRef<HTMLPreElement>(null);
   return (
     <div className="bg-muted relative rounded-md">
       {label && <p className="text-muted-foreground px-3 pt-2 text-xs">{label}</p>}
-      <pre className="overflow-x-auto p-3 pr-12 font-mono text-xs whitespace-pre-wrap break-all">{text}</pre>
+      <pre ref={pre} className="overflow-x-auto p-3 pr-12 font-mono text-xs whitespace-pre-wrap break-all">
+        {text}
+      </pre>
+      {done === "selected" && (
+        <p className="text-muted-foreground px-3 pb-2 text-xs">
+          {t("Selected: press Ctrl+C (⌘C on a Mac) to copy.")}
+        </p>
+      )}
       <Button
         size="icon"
         variant="ghost"
         className="absolute top-1.5 right-1.5 size-8"
         aria-label={t("Copy")}
         onClick={() =>
-          navigator.clipboard?.writeText(text).then(() => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1500);
+          copyText(text, pre.current).then((r) => {
+            setDone(r);
+            setTimeout(() => setDone(""), r === "copied" ? 1500 : 5000);
           })
         }
       >
-        {done ? <Check /> : <Copy />}
+        {done === "copied" ? <Check /> : <Copy />}
       </Button>
     </div>
   );

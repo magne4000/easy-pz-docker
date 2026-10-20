@@ -237,8 +237,17 @@ func registerConsole(api huma.API, d Deps) {
 func registerEvents(api huma.API, d Deps) {
 	sse.Register(api, huma.Operation{
 		OperationID: "stream-events", Method: http.MethodGet, Path: "/events", Tags: []string{"events"},
-		Summary: "Live event stream (invalidation signals)",
+		Summary:  "Live event stream (invalidation signals); accepts ?ticket= (EventSource cannot send headers)",
+		Metadata: map[string]any{ticketMeta: true},
 	}, events.EventTypeMap(), func(ctx context.Context, _ *struct{}, send sse.Sender) {
+		// The stream ends with the credential that opened it: a session that
+		// ends (or a permission revoked in Pelican) stops the events too; the
+		// SPA reconnects with a new ticket, which then needs a live session.
+		if exp := principalFrom(ctx).Expires; !exp.IsZero() {
+			var stop context.CancelFunc
+			ctx, stop = context.WithDeadline(ctx, exp)
+			defer stop()
+		}
 		ch, cancel := d.Bus.Subscribe()
 		defer cancel()
 		ticker := time.NewTicker(heartbeat)
@@ -322,7 +331,7 @@ func registerSystem(api huma.API, d Deps) {
 			b.Timezone, b.Time, b.PUID, b.PGID, b.Branch = d.Cfg.Timezone, time.Now().UTC(), d.Cfg.PUID, d.Cfg.PGID, d.Cfg.ServerBranch
 			b.Disks = d.Disk.Snapshot()
 			b.DiskLevel = string(sys.Worst(b.Disks))
-			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicOrigin()
+			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicBase()
 			b.Subscribers = d.Bus.Stats().Subscribers
 			b.Host = string(app.HostDocker)
 			if d.Cfg.Pelican() {

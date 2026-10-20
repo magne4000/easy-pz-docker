@@ -57,8 +57,8 @@ func main() {
 	err = boot.Run(ctx, cfg, log, version)
 	if err != nil {
 		log.Error("pzman stopped with an error", "err", err)
-		if cfg.Pelican() { // the log file is not the console: say why there too
-			fmt.Fprintf(os.Stderr, "[pzman] stopped with an error: %v\n", err)
+		if cfg.Pelican() { // the log file is not the console (stdout; stderr goes to the log): say why there too
+			fmt.Fprintf(os.Stdout, "[pzman] stopped with an error: %v\n", err)
 		}
 	}
 	logFile.Close()

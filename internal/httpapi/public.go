@@ -1,7 +1,10 @@
 package httpapi
 
 import (
+	"bytes"
 	"crypto/subtle"
+	"encoding/base64"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -163,7 +166,40 @@ func packInfo(d Deps, key string, ms []mods.ModInfo, url string) publicapi.Publi
 	return out
 }
 
-func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
+// clientIPKey holds the public request's client address (Locals).
+type clientIPKey struct{}
+
+// publicIP is the client address the public routes rate-limit by.
+func publicIP(c fiber.Ctx) string {
+	if ip, ok := c.Locals(clientIPKey{}).(string); ok {
+		return ip
+	}
+	return c.IP()
+}
+
+// modsHTML is the public page with its asset URLs under prefix, the path of
+// PANEL_PUBLIC_URL: behind Pelican the page is <prefix>/mods/<token>/ and the
+// panel proxies <prefix>/assets/ to /assets/ only, so the favicon is inlined.
+// No prefix: the file as built.
+func modsHTML(prefix string) ([]byte, error) {
+	b, err := fs.ReadFile(webui.FS(), "mods.html")
+	if err != nil || prefix == "" {
+		return b, err
+	}
+	b = bytes.ReplaceAll(b, []byte(`="/assets/`), []byte(`="`+prefix+`/assets/`))
+	if icon, err := fs.ReadFile(webui.FS(), "favicon.svg"); err == nil {
+		b = bytes.ReplaceAll(b, []byte(`href="/favicon.svg"`),
+			[]byte(`href="data:image/svg+xml;base64,`+base64.StdEncoding.EncodeToString(icon)+`"`))
+	}
+	return b, nil
+}
+
+func registerPublic(a *fiber.App, d Deps, log *slog.Logger, pel *pelican) {
+	clientIP := func(c fiber.Ctx) error {
+		ip := pel.clientIP(c)
+		c.Locals(clientIPKey{}, ip)
+		return c.Next()
+	}
 	guard := func(c fiber.Ctx) error {
 		tok := c.Params("token")
 		if !d.Settings.Get().PublicModsPage || subtle.ConstantTimeCompare([]byte(tok), []byte(d.Settings.ModsToken())) != 1 {
@@ -174,16 +210,23 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		return c.Next()
 	}
 	lim := func(max int) fiber.Handler {
-		return limiter.New(limiter.Config{Max: max, Expiration: time.Minute, KeyGenerator: func(c fiber.Ctx) string { return c.IP() },
+		return limiter.New(limiter.Config{Max: max, Expiration: time.Minute, KeyGenerator: publicIP,
 			LimitReached: func(c fiber.Ctx) error { return problem(c, http.StatusTooManyRequests, "slow down") }})
 	}
-	g := a.Group("/mods/:token", guard)
+	g := a.Group("/mods/:token", clientIP, guard)
+	prefix := d.Cfg.PublicPath()
 
 	g.Get("/", lim(60), func(c fiber.Ctx) error {
 		if !webui.Available() {
 			return c.Status(http.StatusServiceUnavailable).SendString("the UI is not built into this binary")
 		}
-		return serveHTML("mods.html", nil)(c)
+		b, err := modsHTML(prefix)
+		if err != nil {
+			return fiber.ErrNotFound
+		}
+		c.Set(fiber.HeaderCacheControl, "no-cache")
+		c.Set(fiber.HeaderContentType, fiber.MIMETextHTMLCharsetUTF8)
+		return c.Status(http.StatusOK).Send(b)
 	})
 	g.Get("/data.json", lim(60), func(c fiber.Ctx) error {
 		ov, ms, installed, err := d.Mods.EnabledOverview(c.Context())
@@ -191,15 +234,18 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 			return err
 		}
 		ps := newPublicSet(ms, installed)
-		base := "/mods/" + c.Params("token") + "/"
+		page := "/mods/" + c.Params("token") + "/"
+		// Links are path-absolute under PANEL_PUBLIC_URL's path, which the
+		// launcher and the browser resolve against the page URL.
+		base := prefix + page
 		cfgName := d.Cfg.ServerName
 		out := publicapi.PublicData{ServerName: cfgName, Status: d.Coord.Availability(), Items: []publicapi.PublicItem{}, IniName: cfgName + ".ini",
 			GeneratedAt: time.Now().UTC()}
 		out.StatusMessage = statusMessages[out.Status]
 		out.Connect = publicConnect(d)
 		out.Launcher = publicLauncher(d)
-		if o := d.Cfg.PublicOrigin(); o != "" {
-			out.PageURL = o + base
+		if o := d.Cfg.PublicBase(); o != "" {
+			out.PageURL = o + page
 		}
 		out.GameVersion = serverGameVersion.get(serverJar(d))
 		if out.Status == "available" {

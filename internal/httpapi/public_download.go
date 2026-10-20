@@ -40,7 +40,7 @@ func newSlots(max int) *slots { return &slots{max: max, n: map[string]int{}} }
 type slotKey struct{}
 
 func (s *slots) acquire(c fiber.Ctx) error {
-	ip := strings.Clone(c.IP()) // outlives the request
+	ip := strings.Clone(publicIP(c)) // outlives the request
 	s.mu.Lock()
 	if s.n[ip] >= s.max {
 		s.mu.Unlock()

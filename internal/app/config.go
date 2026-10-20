@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -39,18 +40,20 @@ const (
 type Config struct {
 	// Host is where pzman runs: the compose image, or the stock Pelican PZ
 	// egg's container (see pelican.go for what changes there).
-	Host           Host          `env:"PZMAN_HOST" envDefault:"docker"`
-	Env            string        `env:"PANEL_ENV" envDefault:"prod"`
-	LogLevel       string        `env:"PANEL_LOG_LEVEL" envDefault:"info"`
-	Port           int           `env:"PANEL_PORT" envDefault:"8080"`
-	Drivers        DriverMode    `env:"PANEL_DRIVERS" envDefault:"real"`
-	Scenario       string        `env:"PANEL_SCENARIO" envDefault:"idle"`
-	InstallDir     string        `env:"PANEL_INSTALL_DIR" envDefault:"/project-zomboid"`
-	DataDir        string        `env:"PANEL_DATA_DIR" envDefault:"/project-zomboid-config"`
-	BackupDir      string        `env:"PANEL_BACKUP_DIR" envDefault:"/backups"`
-	DBPath         string        `env:"PANEL_DB_PATH" envDefault:"/project-zomboid-config/pzman.db"`
-	AdminUser      string        `env:"PANEL_ADMIN_USER" envDefault:"admin"`
-	AdminHash      string        `env:"PANEL_ADMIN_PASSWORD_HASH,required,notEmpty"`
+	Host       Host       `env:"PZMAN_HOST" envDefault:"docker"`
+	Env        string     `env:"PANEL_ENV" envDefault:"prod"`
+	LogLevel   string     `env:"PANEL_LOG_LEVEL" envDefault:"info"`
+	Port       int        `env:"PANEL_PORT" envDefault:"8080"`
+	Drivers    DriverMode `env:"PANEL_DRIVERS" envDefault:"real"`
+	Scenario   string     `env:"PANEL_SCENARIO" envDefault:"idle"`
+	InstallDir string     `env:"PANEL_INSTALL_DIR" envDefault:"/project-zomboid"`
+	DataDir    string     `env:"PANEL_DATA_DIR" envDefault:"/project-zomboid-config"`
+	BackupDir  string     `env:"PANEL_BACKUP_DIR" envDefault:"/backups"`
+	DBPath     string     `env:"PANEL_DB_PATH" envDefault:"/project-zomboid-config/pzman.db"`
+	AdminUser  string     `env:"PANEL_ADMIN_USER" envDefault:"admin"`
+	// AdminHash is required in Docker mode only: Pelican mode has no
+	// password login (Pelican's tokens replace it).
+	AdminHash      string        `env:"PANEL_ADMIN_PASSWORD_HASH"`
 	JWTSecret      string        `env:"PANEL_JWT_SECRET"`
 	SessionTTL     time.Duration `env:"PANEL_SESSION_TTL" envDefault:"12h"`
 	CookieSecure   CookieSecure  `env:"PANEL_COOKIE_SECURE" envDefault:"auto"`
@@ -107,6 +110,13 @@ type Config struct {
 	// warn when the yolk image updates the game behind pzman's back.
 	EggAutoUpdate string `env:"AUTO_UPDATE"`
 
+	// Pelican mode: the plugin's settings (pzman.env contract). The public
+	// key verifies Pelican's tokens and proxy signatures; the plugin keeps the
+	// private key, so reading pzman.env does not allow minting tokens.
+	PelicanServer    string `env:"PZMAN_PELICAN_SERVER"`
+	PelicanPublicKey string `env:"PZMAN_PELICAN_PUBLIC_KEY"`
+	PelicanPanelURL  string `env:"PZMAN_PELICAN_PANEL_URL"`
+
 	// Root is the Pelican server folder (/home/container), the parent of the
 	// executable's directory; empty in Docker mode.
 	Root string
@@ -144,7 +154,7 @@ func load(environ []string, exe string) (Config, error) {
 			errs = append(errs, err)
 		}
 	}
-	if verr := cfg.validate(err == nil); verr != nil {
+	if verr := cfg.Validate(); verr != nil {
 		errs = append(errs, verr)
 	}
 	return cfg, src.annotate(errors.Join(errs...))
@@ -152,19 +162,17 @@ func load(environ []string, exe string) (Config, error) {
 
 // Validate enforces the cross-field rules. Called by Load; exported so tests
 // can build a Config literal and check one rule at a time.
-func (c Config) Validate() error { return c.validate(true) }
-
-func (c Config) validate(checkHash bool) error {
+func (c Config) Validate() error {
 	var errs []error
 	switch c.Host {
 	case "", HostDocker, HostPelican: // "" is a Config literal: Docker mode
 	default:
 		errs = append(errs, fmt.Errorf("PZMAN_HOST must be %q or %q, got %q", HostDocker, HostPelican, c.Host))
 	}
-	if checkHash || c.AdminHash != "" {
-		if err := validateAdminHash(c.AdminHash); err != nil {
-			errs = append(errs, err)
-		}
+	if c.Pelican() {
+		errs = append(errs, c.validatePelican()...)
+	} else if err := validateAdminHash(c.AdminHash); err != nil {
+		errs = append(errs, err)
 	}
 	switch c.Drivers {
 	case DriversReal, DriversFake:
@@ -192,7 +200,7 @@ func (c Config) validate(checkHash bool) error {
 		errs = append(errs, fmt.Errorf("SERVER_NAME %q is not a valid server name", c.ServerName))
 	}
 	if c.PublicURL != "" {
-		if err := validatePublicURL(c.PublicURL); err != nil {
+		if err := validatePublicURL(c.PublicURL, c.Pelican()); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -205,7 +213,40 @@ func (c Config) validate(checkHash bool) error {
 	return errors.Join(errs...)
 }
 
+var (
+	uuidRe       = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+	publicKeyRe  = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	publicPathRe = regexp.MustCompile(`^(/[A-Za-z0-9._~%-]+)*/?$`)
+)
+
+// validatePelican checks the plugin's settings (pzman.env contract).
+func (c Config) validatePelican() []error {
+	var errs []error
+	switch {
+	case c.PelicanServer == "":
+		errs = append(errs, errors.New("PZMAN_PELICAN_SERVER is required in Pelican mode (the server's UUID)"))
+	case !uuidRe.MatchString(c.PelicanServer):
+		errs = append(errs, fmt.Errorf("PZMAN_PELICAN_SERVER must be the server's UUID, got %q", c.PelicanServer))
+	}
+	switch {
+	case c.PelicanPublicKey == "":
+		errs = append(errs, errors.New("PZMAN_PELICAN_PUBLIC_KEY is required in Pelican mode (the plugin's Ed25519 public key)"))
+	case !publicKeyRe.MatchString(c.PelicanPublicKey):
+		errs = append(errs, fmt.Errorf("PZMAN_PELICAN_PUBLIC_KEY must be an Ed25519 public key as 64 lowercase hex characters, got %q",
+			c.PelicanPublicKey))
+	}
+	if c.PelicanPanelURL == "" {
+		errs = append(errs, errors.New("PZMAN_PELICAN_PANEL_URL is required in Pelican mode (the panel's URL)"))
+	} else if u, ok := parseHTTPURL(c.PelicanPanelURL); !ok || !publicPathRe.MatchString(u.EscapedPath()) {
+		errs = append(errs, fmt.Errorf("PZMAN_PELICAN_PANEL_URL must be http(s)://host[:port][/path], got %q", c.PelicanPanelURL))
+	}
+	return errs
+}
+
 func validateAdminHash(h string) error {
+	if h == "" {
+		return errors.New("PANEL_ADMIN_PASSWORD_HASH is required (a bcrypt hash); see the README for how to generate one")
+	}
 	// bcrypt only. A non-empty check is NOT enough: a plaintext password
 	// here would boot fine and then reject every login forever.
 	if len(h) < 59 || (!strings.HasPrefix(h, "$2a$") &&
@@ -223,14 +264,32 @@ func validateAdminHash(h string) error {
 	return nil
 }
 
-// validatePublicURL accepts only an origin: the panel is served from the root.
-func validatePublicURL(s string) error {
+// parseHTTPURL accepts http(s)://host[:port] with any path, without
+// credentials, query or fragment.
+func parseHTTPURL(s string) (*url.URL, bool) {
 	u, err := url.Parse(s)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil ||
-		(u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("PANEL_PUBLIC_URL must be http(s)://host[:port], got %q", s)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" ||
+		u.ForceQuery || u.Fragment != "" {
+		return nil, false
 	}
 	if _, _, ok := parseHostPort(u.Host); !ok {
+		return nil, false
+	}
+	return u, true
+}
+
+// validatePublicURL accepts an origin in Docker mode, where the panel is
+// served from the root; in Pelican mode the panel's public routes add a path
+// (<panel>/easy-pz/<uuid_short>).
+func validatePublicURL(s string, withPath bool) error {
+	u, ok := parseHTTPURL(s)
+	if withPath {
+		if !ok || !publicPathRe.MatchString(u.EscapedPath()) {
+			return fmt.Errorf("PANEL_PUBLIC_URL must be http(s)://host[:port][/path], got %q", s)
+		}
+		return nil
+	}
+	if !ok || (u.Path != "" && u.Path != "/") {
 		return fmt.Errorf("PANEL_PUBLIC_URL must be http(s)://host[:port], got %q", s)
 	}
 	return nil
@@ -253,8 +312,20 @@ func parseHostPort(s string) (host string, port int, ok bool) {
 	return u.Hostname(), port, true
 }
 
-// PublicOrigin is PANEL_PUBLIC_URL without its trailing slash, "" when unset.
-func (c Config) PublicOrigin() string { return strings.TrimSuffix(c.PublicURL, "/") }
+// PublicBase is PANEL_PUBLIC_URL without its trailing slash, "" when unset:
+// the public mod page is <PublicBase>/mods/<token>/.
+func (c Config) PublicBase() string { return strings.TrimSuffix(c.PublicURL, "/") }
+
+// PublicPath is the path of PublicBase ("" in Docker mode, where it is an
+// origin; /easy-pz/<uuid_short> behind Pelican), prefixed to the public
+// URLs pzman builds so they resolve through the panel's proxy.
+func (c Config) PublicPath() string {
+	u, err := url.Parse(c.PublicBase())
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSuffix(u.EscapedPath(), "/")
+}
 
 // GameAddress is where the launcher joins: PANEL_PUBLIC_GAME_ADDRESS, else
 // PANEL_PUBLIC_URL's hostname (that URL's port is the panel's). Port 0 means
@@ -300,10 +371,12 @@ func (c Config) Location() *time.Location {
 func (c Config) Redacted() string {
 	return fmt.Sprintf("host=%s env=%s port=%d drivers=%s scenario=%s install=%s data=%s backups=%s db=%s admin=%s "+
 		"server=%s branch=%q steam=%t puid=%d pgid=%d xmx=%dg game_port=%d udp_port=%d tz=%s public_url=%q "+
-		"public_game_address=%q jwt_secret=%s rcon_password=%s mods_token=%s",
+		"public_game_address=%q pelican_server=%q pelican_public_key=%q pelican_panel_url=%q jwt_secret=%s rcon_password=%s "+
+		"mods_token=%s",
 		c.Host, c.Env, c.Port, c.Drivers, c.Scenario, c.InstallDir, c.DataDir, c.BackupDir, c.DBPath, c.AdminUser,
 		c.ServerName, c.ServerBranch, c.UseSteam, c.PUID, c.PGID, c.MemoryXmxGB, c.DefaultPort, c.UDPPort, c.Timezone,
-		c.PublicURL, c.PublicGameAddress, setOrUnset(c.JWTSecret), setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
+		c.PublicURL, c.PublicGameAddress, c.PelicanServer, c.PelicanPublicKey, c.PelicanPanelURL, setOrUnset(c.JWTSecret),
+		setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
 }
 
 func setOrUnset(s string) string {

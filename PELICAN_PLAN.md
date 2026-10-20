@@ -107,18 +107,24 @@ quotes, no expansion); the plugin rejects values containing a newline.
 | `PZMAN_HOST=pelican` | selects Pelican mode |
 | `PANEL_PORT` | the server allocation pzman's UI listens on |
 | `PZMAN_PELICAN_SERVER` | the server's UUID (token audience) |
-| `PZMAN_PELICAN_SECRET` | HS256 key shared with the plugin, per server |
+| `PZMAN_PELICAN_PUBLIC_KEY` | the plugin's per-server Ed25519 public key |
 | `PZMAN_PELICAN_PANEL_URL` | panel origin, for links back and redirects |
 | `PANEL_PUBLIC_URL` | `<panel>/easy-pz/<server-id>`: base of the public mod page |
 | `PANEL_PUBLIC_GAME_ADDRESS` | node address + game port, for the launcher |
 
-`PZMAN_PELICAN_SECRET` is 64 lowercase hex characters (32 random bytes); the
-HMAC and JWT key is the ASCII text of that value, not its decoded bytes.
+`PZMAN_PELICAN_PUBLIC_KEY` is the 32-byte Ed25519 public key as 64 lowercase
+hex characters. The plugin generates the keypair per server
+(`sodium_crypto_sign_keypair()`) and keeps the secret key in the panel:
+`pzman.env` is readable by any subuser with file, SFTP or backup access, and
+such a reader must not be able to mint tokens or sign proxied requests.
 
 ### Contract: Pelican tokens
 
-One token format, a JWT signed with HS256 and `PZMAN_PELICAN_SECRET` (any other
-`alg` is refused):
+One token format, a JWT signed with Ed25519 by the plugin and verified with
+`PZMAN_PELICAN_PUBLIC_KEY`: header exactly `{"alg":"EdDSA","typ":"JWT"}`,
+signing input `base64url(header) + "." + base64url(payload)`, signature the
+Ed25519 signature of that input, all base64url without padding. Any other
+`alg` is refused.
 
 | Claim | Value |
 |---|---|
@@ -133,16 +139,39 @@ One token format, a JWT signed with HS256 and `PZMAN_PELICAN_SECRET` (any other
 Two deliveries:
 
 1. **Handoff (browser SSO).** The plugin route mints a token and redirects to
-   `<pzman UI URL>/auth/pelican#t=<token>`. The fragment never reaches logs;
-   the SPA posts it as `{"token": "…"}` to `POST /api/auth/pelican` (public,
-   CSRF as for the login), pzman checks signature, `iss`, `aud`, `exp` and
-   `jti`, and creates its normal session carrying the scopes and the username.
-   A new tab, not an iframe: pzman's session cookie is `SameSite=Strict` and a
-   cross-site iframe would depend on third-party cookies.
+   `<pzman UI URL>/auth/pelican#t=<token>[&to=<percent-encoded path>]`. The
+   fragment never reaches logs; the SPA posts the token as `{"token": "…"}` to
+   `POST /api/auth/pelican` (public), pzman checks signature, `iss`, `aud`,
+   `exp` and `jti`, and answers a session token in the body (`token`). The SPA
+   keeps it in `localStorage` and sends `Authorization: Bearer <session
+   token>` on every API call, then goes to `to` (only a path on its own
+   origin: starts with `/`, not `//`, no backslash) or `/`.
+   - **No cookies in Pelican mode.** Cookies are shared by every port of the
+     node's host, so another tenant's web server on that host would receive
+     them; `localStorage` is per origin, hence per port. With no ambient
+     credential there is no CSRF check.
+   - **One hour, no sliding.** The session (pzman's own HS256 JWT, signed
+     with its session secret) ends one hour after the handoff whatever the
+     activity, so a permission removed in Pelican applies within the hour. An
+     open event stream ends at the expiry of the credential that opened it
+     (the session; for a service token, its own `exp`).
+     On a 401 the SPA renews silently: it navigates to
+     `<panel>/easy-pz/<uuid_short>/open?to=<percent-encoded path>` (exposed as
+     `pelicanOpenUrl` by `GET /api/auth/session`); the panel re-checks the
+     permissions and redirects back with `#t=…&to=…`.
+   - **Tickets.** EventSource and plain download links cannot send headers:
+     `POST /api/auth/ticket` (`{"path": …}`) returns a random single-use
+     ticket valid 30 s, bound to the session's user, scopes and expiry and to
+     that exact path, accepted as `?ticket=` only by the event stream and
+     backup downloads; at most 16 live tickets per user (429 beyond). The SPA
+     mints one per EventSource (re)connection and per download. pzman never
+     logs query strings.
+
+   A new tab, not an iframe: the plugin's page and pzman are different sites.
 2. **Service calls (plugin pages).** `Authorization: Bearer <token>` on each
    request from the panel to `/api/*`, minted per request for the acting
-   Pelican user, so pzman enforces the same scopes. Bearer requests carry no
-   cookies and skip the CSRF check.
+   Pelican user, so pzman enforces the same scopes. Each such token is
+   single-use; pzman tells them from session tokens by their `alg`.
 
 The pzman UI URL is `http://<node FQDN>:<UI allocation port>` unless the
 server page stores an override (a reverse proxy in front of pzman). The panel
@@ -169,7 +198,12 @@ owner and root admins get every scope; subusers get what is ticked.
 | `easy-pz.settings` | `settings` | `system` writes (settings) |
 
 A password session (Docker mode) has every scope. pzman's UI hides what the
-session's scopes do not allow; the API refuses it with 403.
+session's scopes do not allow; the API refuses it with 403. Least privilege on
+top of the table: `GET /api/config/ini` withholds `RCONPassword` (empty,
+`redacted`) without `config`, since RCON runs any console command; creating,
+updating or running a schedule also needs the scope of its action (`restart`,
+`stop`, `save`, `broadcast`: `control`; `backup`: `backups`), so `schedules`
+alone cannot restart the server or take backups.
 
 ### Contract: public mod page through the panel
 
@@ -187,10 +221,17 @@ pzman's token check still applies. pzman builds every public URL (page,
 from the panel URL unchanged (it accepts any path before `/mods/<token>/`).
 
 Each proxied request carries the player's address in `X-Forwarded-For` (one
-IP) and `X-EasyPZ-Proxy: t=<unix seconds>,sig=<hex>`, where `sig` is
-HMAC-SHA256 with `PZMAN_PELICAN_SECRET` over `<t>\n<METHOD>\n<path>` (`path`
-as pzman receives it, without the query). pzman uses `X-Forwarded-For` only
-when the signature is valid and `t` is within 60 s.
+IP) and `X-EasyPZ-Proxy: t=<unix seconds>,sig=<base64url>`, where `sig` is the
+Ed25519 signature (base64url without padding, the plugin's secret key) of
+`<t>\n<METHOD>\n<path>` (`path` as pzman receives it, percent-encoding kept,
+without the query); pzman verifies it with `PZMAN_PELICAN_PUBLIC_KEY` and uses
+`X-Forwarded-For` only when the signature is valid and `t` is within 60 s.
+
+The plugin sends the proxied responses with `Content-Security-Policy: sandbox
+allow-scripts allow-downloads allow-popups`, `X-Content-Type-Options: nosniff`
+and `Access-Control-Allow-Origin: *`, so owner-controlled content never runs
+same-origin with the panel. The page then has an opaque origin: it does not
+depend on storage or cookies, and copying falls back to selecting the text.
 
 ### Contract: release assets
 
@@ -308,6 +349,8 @@ What changed in the plan:
 - [x] Console: every console-ring line (game, `[steamcmd]`, pzman events) also
       to stdout as plain text; pzman's JSON logs to `.easy-pz/logs/` instead of
       stdout. `pzman.log`, rotated to `pzman.log.1` at start above 10 MiB.
+      Pelican also shows stderr: libraries' stderr output (and the standard
+      `log` package) goes to `pzman.log` too (Phase 2 follow-up).
 - [x] stdin: `quit` (the egg's stop command) runs pzman's shutdown (save, quit,
       await JVM) and exits 0; any other line goes to the game's stdin, which
       PZ reads (`System.in`); its reply reaches the console through the
@@ -337,25 +380,46 @@ window restarts PZ while Pelican keeps showing the server running.
 
 ### Phase 2: pzman auth and public URLs for Pelican (Go + SPA)
 
-- [ ] Token verification (HS256, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
+- [x] Token verification (EdDSA, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
       single-use `jti` store for handoffs.
-- [ ] `POST /api/auth/pelican` (handoff → session with scopes, username from
+      Every token (handoff and bearer) is single-use; the in-memory store keeps
+      a `jti` until `exp` + 30 s and fails closed past 10 000 live entries.
+      `iat`, `exp`, `scp` (an array) and a `jti` of 22–128 base64url/hex
+      characters are required; unknown scopes are ignored (a newer plugin may
+      grant scopes this pzman lacks). Go tests pin the plugin's own vectors.
+- [x] `POST /api/auth/pelican` (handoff → session with scopes, username from
       `name`); SPA route `/auth/pelican` reads the fragment and posts it.
-- [ ] Bearer authentication for service calls; CSRF check skipped for Bearer.
-- [ ] Scopes in the session; per-operation enforcement from Huma tags + method
+      A token without `read` gets 403. `GET /api/auth/session` has `username`
+      (was `user`), `scopes`, `host` and, on Pelican, `pelicanPanelUrl` and
+      `pelicanOpenUrl` (renewal).
+- [x] Bearer authentication for service calls; CSRF check skipped for Bearer.
+      Pelican mode sets no cookie and has no CSRF check at all: the SPA's
+      session is a bearer too (token contract above), with tickets for the
+      event stream and downloads.
+- [x] Scopes in the session; per-operation enforcement from Huma tags + method
       (table above); 403 with a clear message; SPA hides what is not allowed.
-- [ ] Pelican mode: password login disabled, `PANEL_ADMIN_PASSWORD_HASH` not
+      `GET /backups/{id}/download` needs `backups` (operation metadata); a
+      test walks every registered operation against the table. Writes of
+      Mods' "update when empty" buttons call `/updates/*`: `control`.
+- [x] Pelican mode: password login disabled, `PANEL_ADMIN_PASSWORD_HASH` not
       required; the login page says to open easy-pz from Pelican, with a link to
       `PZMAN_PELICAN_PANEL_URL`.
-- [ ] Public URLs: `PANEL_PUBLIC_URL` may carry a path in Pelican mode; page
+- [x] Public URLs: `PANEL_PUBLIC_URL` may carry a path in Pelican mode; page
       assets, `data.json` links, pack and file downloads all derive from it.
-- [ ] Client IP behind the panel: every local client, the panel included,
+      Links are path-absolute under that path (Docker output unchanged);
+      `mods.html` gets its `/assets/` URLs prefixed and its favicon inlined
+      when served.
+- [x] Client IP behind the panel: every local client, the panel included,
       reaches pzman from `172.18.0.1` (Phase 0), so an address-based trusted
       proxy cannot tell the panel from anyone else. The plugin signs each
-      proxied request (HMAC with `PZMAN_PELICAN_SECRET` over method, path and
+      proxied request (Ed25519 over method, path and
       a timestamp, in a header); pzman takes `X-Forwarded-For` only from signed
       requests, so per-IP limits apply to players.
-- [ ] Audit: actions logged with the Pelican username.
+      In Pelican mode Fiber's `ProxyHeader` is off: `X-Forwarded-For` counts
+      nowhere else.
+- [x] Audit: actions logged with the Pelican username.
+      Every Pelican write (`pelican action`, with status) and every refusal
+      (`pelican action refused`) goes to `pzman.log`.
 
 Done when: a forged, expired, replayed or wrong-server token is refused; a
 token with `read` only cannot change anything; the mod page and launcher work

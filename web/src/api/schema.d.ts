@@ -13,6 +13,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Password login (Docker mode only) */
         post: operations["login"];
         delete?: never;
         options?: never;
@@ -29,7 +30,28 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** End the session (Pelican mode: the SPA forgets its token) */
         post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/pelican": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trade a Pelican handoff token for a session (Pelican mode only)
+         * @description The plugin's *Open easy-pz* redirects to `/auth/pelican#t=<token>`; the page posts the token here. Each token works once. The answer's `token` is the session (one hour, no cookie): send it as `Authorization: Bearer`.
+         */
+        post: operations["login-pelican"];
         delete?: never;
         options?: never;
         head?: never;
@@ -43,10 +65,30 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current session; also issues the CSRF cookie */
+        /** Current session; also issues the CSRF cookie (Docker mode) */
         get: operations["get-session"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A single-use, 30 s ticket for the event stream or a backup download
+         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user, scopes and expiry. At most 16 live tickets per user (429).
+         */
+        post: operations["create-ticket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -96,7 +138,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download the archive (tar+zstd) */
+        /** Download the archive (tar+zstd); accepts ?ticket= for plain download links */
         get: operations["download-backup"];
         put?: never;
         post?: never;
@@ -147,7 +189,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The server .ini as structured entries */
+        /** The server .ini as structured entries; RCONPassword is withheld without the config scope */
         get: operations["get-ini"];
         /** Save ini values (and optionally reloadoptions) */
         put: operations["update-ini"];
@@ -234,7 +276,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Live event stream (invalidation signals) */
+        /** Live event stream (invalidation signals); accepts ?ticket= (EventSource cannot send headers) */
         get: operations["stream-events"];
         put?: never;
         post?: never;
@@ -445,7 +487,7 @@ export interface paths {
         /** Scheduled restarts, saves, broadcasts and backups */
         get: operations["list-schedules"];
         put?: never;
-        /** Create a schedule */
+        /** Create a schedule (its action's scope is needed too) */
         post: operations["create-schedule"];
         delete?: never;
         options?: never;
@@ -461,7 +503,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update a schedule */
+        /** Update a schedule (the scopes of its current and new action are needed too) */
         put: operations["update-schedule"];
         post?: never;
         /** Delete a schedule */
@@ -480,7 +522,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run a schedule now */
+        /** Run a schedule now (its action's scope is needed too) */
         post: operations["run-schedule"];
         delete?: never;
         options?: never;
@@ -959,6 +1001,8 @@ export interface components {
             key: string;
             /** @description owned by pzman (mods, backups); edit it elsewhere */
             managed: boolean;
+            /** @description value withheld (empty): RCONPassword without the config scope */
+            redacted?: boolean;
             value: string;
         };
         IniOutputBody: {
@@ -1156,6 +1200,16 @@ export interface components {
             sandboxPath: string;
             saveDir: string;
             workshopDir: string;
+        };
+        PelicanLoginInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/PelicanLoginInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description the handoff token from the #t= fragment of /auth/pelican */
+            token: string;
         };
         PinInputBody: {
             /**
@@ -1452,7 +1506,21 @@ export interface components {
             authenticated: boolean;
             /** Format: date-time */
             expiresAt?: string;
-            user?: string;
+            /**
+             * @description where pzman runs (PZMAN_HOST); pelican: no password login, open easy-pz from Pelican
+             * @enum {string}
+             */
+            host: "docker" | "pelican";
+            /** @description pelican: the panel's Open easy-pz route for this server; add ?to=<percent-encoded path> to sign in again and come back there */
+            pelicanOpenUrl?: string;
+            /** @description pelican: the panel's URL (PZMAN_PELICAN_PANEL_URL) */
+            pelicanPanelUrl?: string;
+            /** @description what the session may do (permissions contract); every scope for a password session */
+            scopes: ("read" | "control" | "console" | "mods" | "config" | "backups" | "schedules" | "settings")[];
+            /** @description pelican, sign-in only: the session token, sent as Authorization: Bearer (no cookies on Pelican); it ends at expiresAt and never slides */
+            token?: string;
+            /** @description PANEL_ADMIN_USER, or the Pelican username */
+            username?: string;
         };
         Settings: {
             /**
@@ -1595,6 +1663,28 @@ export interface components {
             readonly $schema?: string;
             items: components["schemas"]["Task"][] | null;
         };
+        TicketInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/TicketInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description the request path the ticket is for */
+            path: string;
+        };
+        TicketOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/TicketOutputBody.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description pass as ?ticket= on that path, once */
+            ticket: string;
+        };
         ToggleModInputBody: {
             /**
              * Format: uri
@@ -1712,6 +1802,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -1768,6 +1867,66 @@ export interface operations {
             };
         };
     };
+    "login-pelican": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PelicanLoginInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOutputBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
     "get-session": {
         parameters: {
             query?: never;
@@ -1788,6 +1947,66 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketOutputBody"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Too Many Requests */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3087,6 +3306,15 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -3129,6 +3357,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Not Found */
@@ -3225,6 +3462,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcceptedBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Not Found */

@@ -5,8 +5,10 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -27,14 +29,25 @@ const (
 	csrfCookie    = "pzman_csrf"
 	csrfHeader    = "X-CSRF-Token"
 	publicMeta    = "public"
+	// pelicanSessionTTL bounds a Pelican session, which never slides: a
+	// permission revoked in Pelican applies within it.
+	pelicanSessionTTL = time.Hour
 )
 
+// auth: Docker mode signs the admin in with a password and keeps the session
+// in a cookie (CSRF-protected). Pelican mode sets no cookie at all (cookies
+// are shared by every port of the node's host, so another tenant's web server
+// would receive them): the handoff returns a session token that the SPA sends
+// as Authorization: Bearer, like the panel's single-use Pelican tokens.
 type auth struct {
 	cfg    app.Config
 	log    *slog.Logger
 	secret []byte
 	hash   []byte
 	now    func() time.Time
+	// pelican verifies Pelican's tokens; nil in Docker mode.
+	pelican *pelican
+	tickets *tickets
 }
 
 func newAuth(cfg app.Config, log *slog.Logger) (*auth, error) {
@@ -46,7 +59,16 @@ func newAuth(cfg app.Config, log *slog.Logger) (*auth, error) {
 			return nil, err
 		}
 	}
-	return &auth{cfg: cfg, log: log, secret: secret, hash: []byte(cfg.AdminHash), now: time.Now}, nil
+	a := &auth{cfg: cfg, log: log, secret: secret, hash: []byte(cfg.AdminHash), now: time.Now}
+	now := func() time.Time { return a.now() }
+	a.tickets = newTickets(now)
+	if cfg.Pelican() {
+		var err error
+		if a.pelican, err = newPelican(cfg.PelicanServer, cfg.PelicanPublicKey, now); err != nil {
+			return nil, err
+		}
+	}
+	return a, nil
 }
 
 // secure implements PANEL_COOKIE_SECURE: auto trusts X-Forwarded-Proto
@@ -66,6 +88,11 @@ func problem(c fiber.Ctx, code int, detail string) error {
 }
 
 func (a *auth) csrf() fiber.Handler {
+	if a.pelican != nil {
+		// No cookies, hence no ambient credential a cross-site request could
+		// ride on: every request authenticates with a header (or a ticket).
+		return func(c fiber.Ctx) error { return c.Next() }
+	}
 	// One storage shared by the Secure and non-Secure cookie variants so they
 	// see the same tokens.
 	storage := memory.New()
@@ -105,31 +132,53 @@ func (a *auth) loginLimiter() fiber.Handler {
 	})
 }
 
+// claims of pzman's own session token (the Docker cookie, the Pelican bearer).
 type claims struct {
 	jwt.RegisteredClaims
+	Name   string   `json:"name,omitempty"`
+	Scopes []string `json:"scp,omitempty"`
 }
 
-func (a *auth) issue(user string) (string, time.Time, error) {
+func (a *auth) issue(p principal) (string, time.Time, error) {
 	now := a.now()
 	exp := now.Add(a.cfg.SessionTTL)
-	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{jwt.RegisteredClaims{
-		Subject: user, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(exp),
-	}})
+	if a.pelican != nil {
+		exp = now.Add(pelicanSessionTTL)
+	}
+	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, claims{RegisteredClaims: jwt.RegisteredClaims{
+		Subject: p.Subject, IssuedAt: jwt.NewNumericDate(now), ExpiresAt: jwt.NewNumericDate(exp),
+	}, Name: p.Name, Scopes: p.Scopes})
 	s, err := tok.SignedString(a.secret)
 	return s, exp, err
 }
 
-func (a *auth) verify(raw string) (*claims, error) {
+// verify reads a session token: in Docker mode the admin's, with every
+// scope; in Pelican mode a handoff's, with the scopes Pelican granted.
+func (a *auth) verify(raw string) (principal, time.Time, error) {
 	var cl claims
 	_, err := jwt.ParseWithClaims(raw, &cl, func(*jwt.Token) (any, error) { return a.secret, nil },
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithTimeFunc(a.now))
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}), jwt.WithExpirationRequired(), jwt.WithTimeFunc(a.now))
 	if err != nil {
-		return nil, err
+		return principal{}, time.Time{}, err
+	}
+	exp := cl.ExpiresAt.Time
+	if a.pelican != nil {
+		if cl.Subject == "" {
+			return principal{}, time.Time{}, errors.New("no subject")
+		}
+		return principal{Subject: cl.Subject, Name: cl.Name, Scopes: knownScopes(cl.Scopes), Pelican: true, Expires: exp}, exp, nil
 	}
 	if subtle.ConstantTimeCompare([]byte(cl.Subject), []byte(a.cfg.AdminUser)) != 1 {
-		return nil, errors.New("unknown subject")
+		return principal{}, time.Time{}, errors.New("unknown subject")
 	}
-	return &cl, nil
+	p := a.admin()
+	p.Expires = exp
+	return p, exp, nil
+}
+
+// admin is the password session's principal: every scope.
+func (a *auth) admin() principal {
+	return principal{Subject: a.cfg.AdminUser, Name: a.cfg.AdminUser, Scopes: allScopes}
 }
 
 func (a *auth) setCookie(c fiber.Ctx, value string, exp time.Time) {
@@ -137,43 +186,177 @@ func (a *auth) setCookie(c fiber.Ctx, value string, exp time.Time) {
 		Secure: a.secure(c), Expires: exp})
 }
 
-type ctxKey struct{}
+// isSessionToken tells pzman's session tokens (HS256) from the plugin's
+// single-use tokens (EdDSA) by their header, before either is verified.
+func isSessionToken(tok string) bool {
+	t, _, err := jwt.NewParser().ParseUnverified(tok, &jwt.RegisteredClaims{})
+	return err == nil && t.Method == jwt.SigningMethodHS256
+}
 
-// middleware rejects every non-public operation without a valid session and
-// slides the session forward once it is half-way to expiry.
+// authenticate finds the request's principal. Pelican mode: the bearer is a
+// pzman session token (the SPA; no sliding) or a single-use Pelican token
+// (service calls). Docker mode: the session cookie, which slides forward once
+// it is half-way to expiry.
+func (a *auth) authenticate(c fiber.Ctx) (principal, string, error) {
+	if a.pelican != nil {
+		tok := bearer(c)
+		switch {
+		case tok == "":
+			return principal{}, "", errors.New("authentication required")
+		case len(tok) > maxBearerBytes:
+			return principal{}, "bearer", errors.New("token too long")
+		case isSessionToken(tok):
+			p, _, err := a.verify(tok)
+			if err != nil {
+				return principal{}, "session", fmt.Errorf("the session ended (%w): open easy-pz from Pelican again", err)
+			}
+			return p, "session", nil
+		}
+		p, err := a.pelican.verify(tok)
+		return p, "bearer", err
+	}
+	p, exp, err := a.verify(c.Cookies(sessionCookie))
+	if err != nil {
+		return principal{}, "", errors.New("authentication required")
+	}
+	if exp.Sub(a.now()) < a.cfg.SessionTTL/2 {
+		if tok, exp, err := a.issue(p); err == nil {
+			a.setCookie(c, tok, exp)
+		}
+	}
+	return p, "session", nil
+}
+
+// middleware rejects every non-public operation without a valid session,
+// bearer token or ticket, or without the scope the operation needs; in
+// Pelican mode it logs every write with the Pelican user (audit).
 func (a *auth) middleware(api huma.API) func(huma.Context, func(huma.Context)) {
 	return func(ctx huma.Context, next func(huma.Context)) {
-		if op := ctx.Operation(); op != nil && op.Metadata[publicMeta] == true {
+		op := ctx.Operation()
+		if op != nil && op.Metadata[publicMeta] == true {
 			next(ctx)
 			return
 		}
 		c := humafiber.Unwrap(ctx)
-		cl, err := a.verify(c.Cookies(sessionCookie))
+		method, path := c.Method(), c.Path() // never the query: it may carry a ticket
+		var p principal
+		var via string
+		var err error
+		if id := c.Query("ticket"); id != "" && op != nil && op.Metadata[ticketMeta] == true {
+			via = "ticket"
+			p, err = a.tickets.use(id, path)
+		} else {
+			p, via, err = a.authenticate(c)
+		}
 		if err != nil {
-			huma.WriteErr(api, ctx, http.StatusUnauthorized, "authentication required")
+			msg := err.Error()
+			switch via {
+			case "bearer":
+				msg = "bearer token refused: " + msg
+				a.log.Warn("pelican bearer token refused", "method", method, "path", path, "err", err)
+			case "ticket":
+				msg = "ticket refused: " + msg
+			}
+			huma.WriteErr(api, ctx, http.StatusUnauthorized, msg)
 			return
 		}
-		if cl.ExpiresAt != nil && cl.ExpiresAt.Sub(a.now()) < a.cfg.SessionTTL/2 {
-			if tok, exp, err := a.issue(cl.Subject); err == nil {
-				a.setCookie(c, tok, exp)
-			}
+		need, ok := "", false
+		if op != nil {
+			need, ok = requiredScope(op)
 		}
-		next(huma.WithValue(ctx, ctxKey{}, cl.Subject))
+		if !ok || !p.has(need) {
+			msg := "this operation is not allowed to anyone"
+			if ok {
+				msg = fmt.Sprintf("permission denied: this needs the %q scope", need)
+				if p.Pelican {
+					msg = fmt.Sprintf("permission denied: this needs the easy-pz.%s permission in Pelican", need)
+				}
+			}
+			if p.Pelican {
+				a.log.Warn("pelican action refused", "user", p.Name, "sub", p.Subject, "via", via, "method", method, "path", path,
+					"need", need)
+			}
+			huma.WriteErr(api, ctx, http.StatusForbidden, msg)
+			return
+		}
+		ctx = huma.WithValue(ctx, ctxKey{}, p)
+		next(ctx)
+		if p.Pelican && method != http.MethodGet {
+			a.log.Info("pelican action", "user", p.Name, "sub", p.Subject, "via", via, "method", method, "path", path,
+				"status", ctx.Status())
+		}
 	}
 }
 
 type SessionOutput struct {
 	Body struct {
 		Authenticated bool      `json:"authenticated"`
-		User          string    `json:"user,omitempty"`
+		Username      string    `json:"username,omitempty" doc:"PANEL_ADMIN_USER, or the Pelican username"`
+		Scopes        []string  `json:"scopes" nullable:"false" enum:"read,control,console,mods,config,backups,schedules,settings" doc:"what the session may do (permissions contract); every scope for a password session"`
 		ExpiresAt     time.Time `json:"expiresAt,omitzero"`
+		Host          string    `json:"host" enum:"docker,pelican" doc:"where pzman runs (PZMAN_HOST); pelican: no password login, open easy-pz from Pelican"`
+		// Set in Pelican mode, also when signed out: the login page links there.
+		PelicanPanelURL string `json:"pelicanPanelUrl,omitempty" doc:"pelican: the panel's URL (PZMAN_PELICAN_PANEL_URL)"`
+		PelicanOpenURL  string `json:"pelicanOpenUrl,omitempty" doc:"pelican: the panel's Open easy-pz route for this server; add ?to=<percent-encoded path> to sign in again and come back there"`
+		Token           string `json:"token,omitempty" doc:"pelican, sign-in only: the session token, sent as Authorization: Bearer (no cookies on Pelican); it ends at expiresAt and never slides"`
 	}
+}
+
+// session is the output for p (nil: signed out).
+func (a *auth) session(p *principal, exp time.Time) *SessionOutput {
+	out := &SessionOutput{}
+	b := &out.Body
+	b.Scopes, b.Host = []string{}, string(app.HostDocker)
+	if a.cfg.Pelican() {
+		b.Host, b.PelicanPanelURL = string(app.HostPelican), strings.TrimSuffix(a.cfg.PelicanPanelURL, "/")
+		// The panel's routes use the server's uuid_short: the UUID's first 8 characters.
+		b.PelicanOpenURL = b.PelicanPanelURL + "/easy-pz/" + a.cfg.PelicanServer[:min(8, len(a.cfg.PelicanServer))] + "/open"
+	}
+	if p != nil {
+		b.Authenticated, b.Username, b.Scopes, b.ExpiresAt = true, p.Name, p.Scopes, exp
+	}
+	return out
+}
+
+// startSession issues p's session: a cookie in Docker mode, the token in the
+// body in Pelican mode.
+func (a *auth) startSession(ctx context.Context, p principal) (*SessionOutput, error) {
+	tok, exp, err := a.issue(p)
+	if err != nil {
+		return nil, err
+	}
+	out := a.session(&p, exp)
+	if a.pelican != nil {
+		out.Body.Token = tok
+	} else if c := fiberCtx(ctx); c != nil {
+		a.setCookie(c, tok, exp)
+	}
+	return out, nil
 }
 
 type LoginInput struct {
 	Body struct {
 		Username string `json:"username" minLength:"1" maxLength:"200"`
 		Password string `json:"password" minLength:"1" maxLength:"200"`
+	}
+}
+
+type PelicanLoginInput struct {
+	Body struct {
+		Token string `json:"token" minLength:"1" maxLength:"8192" doc:"the handoff token from the #t= fragment of /auth/pelican"`
+	}
+}
+
+type TicketInput struct {
+	Body struct {
+		Path string `json:"path" pattern:"^/api/(events|backups/[0-9]+/download)$" doc:"the request path the ticket is for"`
+	}
+}
+
+type TicketOutput struct {
+	Body struct {
+		Ticket    string    `json:"ticket" doc:"pass as ?ticket= on that path, once"`
+		ExpiresAt time.Time `json:"expiresAt"`
 	}
 }
 
@@ -185,26 +368,34 @@ func (a *auth) register(api huma.API) {
 	pub := map[string]any{publicMeta: true}
 	huma.Register(api, huma.Operation{
 		OperationID: "get-session", Method: http.MethodGet, Path: "/auth/session", Tags: []string{"auth"}, Metadata: pub,
-		Summary: "Current session; also issues the CSRF cookie",
+		Summary: "Current session; also issues the CSRF cookie (Docker mode)",
 	}, func(ctx context.Context, _ *struct{}) (*SessionOutput, error) {
-		out := &SessionOutput{}
 		c := fiberCtx(ctx)
 		if c == nil {
-			return out, nil
+			return a.session(nil, time.Time{}), nil
 		}
-		if cl, err := a.verify(c.Cookies(sessionCookie)); err == nil {
-			out.Body.Authenticated, out.Body.User = true, cl.Subject
-			if cl.ExpiresAt != nil {
-				out.Body.ExpiresAt = cl.ExpiresAt.Time
+		raw := c.Cookies(sessionCookie)
+		if a.pelican != nil {
+			raw = ""
+			if tok := bearer(c); isSessionToken(tok) { // never spend a single-use Pelican token here
+				raw = tok
 			}
 		}
-		return out, nil
+		if p, exp, err := a.verify(raw); err == nil {
+			return a.session(&p, exp), nil
+		}
+		return a.session(nil, time.Time{}), nil
 	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "login", Method: http.MethodPost, Path: "/auth/login", Tags: []string{"auth"}, Metadata: pub,
-		Errors: []int{http.StatusUnauthorized, http.StatusTooManyRequests},
+		Summary: "Password login (Docker mode only)",
+		Errors:  []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests},
 	}, func(ctx context.Context, in *LoginInput) (*SessionOutput, error) {
+		if a.cfg.Pelican() {
+			return nil, huma.Error403Forbidden("password login is disabled on Pelican: open easy-pz from the server's page in Pelican (" +
+				strings.TrimSuffix(a.cfg.PelicanPanelURL, "/") + ")")
+		}
 		userOK := subtle.ConstantTimeCompare([]byte(in.Body.Username), []byte(a.cfg.AdminUser)) == 1
 		// Always run bcrypt so timing does not reveal whether the user exists.
 		pwErr := bcrypt.CompareHashAndPassword(a.hash, []byte(in.Body.Password))
@@ -212,23 +403,59 @@ func (a *auth) register(api huma.API) {
 			a.log.Warn("failed login", "user", in.Body.Username)
 			return nil, huma.Error401Unauthorized("invalid username or password")
 		}
-		tok, exp, err := a.issue(a.cfg.AdminUser)
+		return a.startSession(ctx, a.admin())
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "login-pelican", Method: http.MethodPost, Path: "/auth/pelican", Tags: []string{"auth"}, Metadata: pub,
+		Summary: "Trade a Pelican handoff token for a session (Pelican mode only)",
+		Description: "The plugin's *Open easy-pz* redirects to `/auth/pelican#t=<token>`; the page posts the token here. Each token " +
+			"works once. The answer's `token` is the session (one hour, no cookie): send it as `Authorization: Bearer`.",
+		Errors: []int{http.StatusUnauthorized, http.StatusForbidden},
+	}, func(ctx context.Context, in *PelicanLoginInput) (*SessionOutput, error) {
+		if a.pelican == nil {
+			return nil, huma.Error403Forbidden("Pelican sign-in is only available when pzman runs on Pelican")
+		}
+		p, err := a.pelican.verify(in.Body.Token)
 		if err != nil {
-			return nil, err
+			a.log.Warn("pelican sign-in refused", "err", err)
+			return nil, huma.Error401Unauthorized("the Pelican sign-in link is invalid or was already used (" + err.Error() +
+				"); open easy-pz from Pelican again")
 		}
-		if c := fiberCtx(ctx); c != nil {
-			a.setCookie(c, tok, exp)
+		if !p.has(scopeRead) {
+			a.log.Warn("pelican sign-in refused: no read scope", "user", p.Name, "sub", p.Subject)
+			return nil, huma.Error403Forbidden("your Pelican permissions do not include easy-pz.read")
 		}
-		out := &SessionOutput{}
-		out.Body.Authenticated, out.Body.User, out.Body.ExpiresAt = true, a.cfg.AdminUser, exp
+		a.log.Info("pelican sign-in", "user", p.Name, "sub", p.Subject, "scopes", strings.Join(p.Scopes, ","))
+		return a.startSession(ctx, p)
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "create-ticket", Method: http.MethodPost, Path: "/auth/ticket", Tags: []string{"auth"},
+		Metadata: map[string]any{scopeMeta: scopeRead},
+		Summary:  "A single-use, 30 s ticket for the event stream or a backup download",
+		Description: "For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` " +
+			"on the given path. It carries the session's user, scopes and expiry. At most 16 live tickets per user (429).",
+		Errors: []int{http.StatusTooManyRequests, http.StatusServiceUnavailable},
+	}, func(ctx context.Context, in *TicketInput) (*TicketOutput, error) {
+		id, exp, err := a.tickets.issue(principalFrom(ctx), in.Body.Path)
+		switch {
+		case errors.Is(err, errTooManyTickets):
+			return nil, huma.Error429TooManyRequests(err.Error())
+		case err != nil:
+			return nil, huma.Error503ServiceUnavailable(err.Error())
+		}
+		out := &TicketOutput{}
+		out.Body.Ticket, out.Body.ExpiresAt = id, exp
 		return out, nil
 	})
 
 	huma.Register(api, huma.Operation{
 		OperationID: "logout", Method: http.MethodPost, Path: "/auth/logout", Tags: []string{"auth"}, Metadata: pub,
+		Summary:       "End the session (Pelican mode: the SPA forgets its token)",
 		DefaultStatus: http.StatusNoContent,
 	}, func(ctx context.Context, _ *struct{}) (*struct{}, error) {
-		if c := fiberCtx(ctx); c != nil {
+		if c := fiberCtx(ctx); c != nil && a.pelican == nil {
 			a.setCookie(c, "", time.Unix(1, 0))
 		}
 		return nil, nil

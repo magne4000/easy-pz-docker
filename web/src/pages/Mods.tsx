@@ -43,6 +43,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes, formatDate } from "@/lib/format";
+import { useCan } from "@/lib/scopes";
 
 // parseWorkshopIds accepts bare ids, Workshop URLs (?id=123) and any separators.
 function parseWorkshopIds(text: string): string[] {
@@ -334,6 +335,7 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
         : unwrap(api.DELETE("/mods/{workshopId}", { params: { path: { workshopId: item.workshopId } } })),
     { success: t("Removed"), invalidate: [keys.mods] },
   );
+  const edit = useCan("mods");
   return (
     <Card className="gap-3 py-4">
       <CardHeader className="flex flex-row items-start gap-4 px-4">
@@ -401,26 +403,28 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
           </CardDescription>
           {item.error && <p className="text-destructive mt-1 text-xs">{item.error}</p>}
         </div>
-        <Confirm
-          trigger={
-            <Button variant="ghost" size="icon" aria-label={t("Remove")}>
-              <Trash2 />
-            </Button>
-          }
-          title={t("Remove {{title}}?", { title: item.title })}
-          description={
-            item.local
-              ? t(
-                  "Its folder is deleted from the server's mods folder, for good: backups do not include it. It is removed from Mods= and stays loaded until the next restart.",
-                )
-              : t(
-                  "It is untracked, unlinked, removed from Mods= and its download is deleted. It stays loaded until the next restart.",
-                )
-          }
-          confirm={t("Remove")}
-          destructive
-          onConfirm={() => remove.mutate()}
-        />
+        {edit && (
+          <Confirm
+            trigger={
+              <Button variant="ghost" size="icon" aria-label={t("Remove")}>
+                <Trash2 />
+              </Button>
+            }
+            title={t("Remove {{title}}?", { title: item.title })}
+            description={
+              item.local
+                ? t(
+                    "Its folder is deleted from the server's mods folder, for good: backups do not include it. It is removed from Mods= and stays loaded until the next restart.",
+                  )
+                : t(
+                    "It is untracked, unlinked, removed from Mods= and its download is deleted. It stays loaded until the next restart.",
+                  )
+            }
+            confirm={t("Remove")}
+            destructive
+            onConfirm={() => remove.mutate()}
+          />
+        )}
       </CardHeader>
       {(item.mods ?? []).length > 0 && (
         <CardContent className="space-y-2 px-4">
@@ -429,6 +433,7 @@ function ItemCard({ item }: { item: Schemas["ItemView"] }) {
               <Switch
                 checked={m.enabled}
                 onCheckedChange={(enabled) => toggle.mutate({ modId: m.modId, enabled })}
+                disabled={!edit}
                 aria-label={t("Enable {{mod}}", { mod: m.modId })}
               />
               <div className="min-w-0 flex-1 text-sm">
@@ -480,6 +485,7 @@ function LoadOrder({ order }: { order: string[] }) {
     success: t("Sorted by dependencies"),
     invalidate: [keys.mods],
   });
+  const edit = useCan("mods");
   const move = (i: number, d: number) => {
     const next = [...draft];
     [next[i], next[i + d]] = [next[i + d], next[i]];
@@ -502,40 +508,51 @@ function LoadOrder({ order }: { order: string[] }) {
               <li key={id} className="flex items-center gap-2 rounded-md border px-2 py-1 text-sm">
                 <span className="text-muted-foreground w-6 text-right text-xs">{i + 1}</span>
                 <span className="min-w-0 flex-1 truncate font-mono text-xs">{id}</span>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  disabled={i === 0}
-                  onClick={() => move(i, -1)}
-                  aria-label={t("Move up")}
-                >
-                  <ArrowUp />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  disabled={i === draft.length - 1}
-                  onClick={() => move(i, 1)}
-                  aria-label={t("Move down")}
-                >
-                  <ArrowDown />
-                </Button>
+                {edit && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      disabled={i === 0}
+                      onClick={() => move(i, -1)}
+                      aria-label={t("Move up")}
+                    >
+                      <ArrowUp />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      disabled={i === draft.length - 1}
+                      onClick={() => move(i, 1)}
+                      aria-label={t("Move down")}
+                    >
+                      <ArrowDown />
+                    </Button>
+                  </>
+                )}
               </li>
             ))}
           </ol>
         )}
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => autosort.mutate()} disabled={autosort.isPending}>
-            <Wand2 /> {t("Auto-sort")}
-          </Button>
-          {dirty && (
-            <Button size="sm" onClick={() => save.mutate(draft)} disabled={save.isPending}>
-              {t("Save order")}
+        {edit && (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => autosort.mutate()}
+              disabled={autosort.isPending}
+            >
+              <Wand2 /> {t("Auto-sort")}
             </Button>
-          )}
-        </div>
+            {dirty && (
+              <Button size="sm" onClick={() => save.mutate(draft)} disabled={save.isPending}>
+                {t("Save order")}
+              </Button>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
@@ -559,6 +576,9 @@ export default function Mods() {
     success: t("The server restarts as soon as it is empty"),
     invalidate: [keys.updates],
   });
+  const edit = useCan("mods");
+  // The update window (restart/update when empty) is a server action.
+  const control = useCan("control");
   const ov = mods.data;
   const missing = useMemo(
     () =>
@@ -582,15 +602,21 @@ export default function Mods() {
         }
         actions={
           <>
-            <Button variant="outline" onClick={() => check.mutate()} disabled={check.isPending}>
-              <RefreshCw className={check.isPending ? "animate-spin" : undefined} /> {t("Check updates")}
-            </Button>
+            {edit && (
+              <Button variant="outline" onClick={() => check.mutate()} disabled={check.isPending}>
+                <RefreshCw className={check.isPending ? "animate-spin" : undefined} /> {t("Check updates")}
+              </Button>
+            )}
             <ConflictsDialog />
-            <CollectionDialog />
-            <UploadDialog
-              localFolders={(ov?.items ?? []).flatMap((i) => (i.local && i.folder ? [i.folder] : []))}
-            />
-            <AddDialog />
+            {edit && (
+              <>
+                <CollectionDialog />
+                <UploadDialog
+                  localFolders={(ov?.items ?? []).flatMap((i) => (i.local && i.folder ? [i.folder] : []))}
+                />
+                <AddDialog />
+              </>
+            )}
           </>
         }
       />
@@ -608,9 +634,11 @@ export default function Mods() {
             <AlertTitle>{t("Restart required")}</AlertTitle>
             <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
               <span>{t("The running server loaded a different mod set than the one configured now.")}</span>
-              <Button size="sm" variant="outline" onClick={() => apply.mutate()} disabled={apply.isPending}>
-                {t("Restart when empty")}
-              </Button>
+              {control && (
+                <Button size="sm" variant="outline" onClick={() => apply.mutate()} disabled={apply.isPending}>
+                  {t("Restart when empty")}
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
         )}
@@ -624,9 +652,11 @@ export default function Mods() {
                   "Mods are updated inside the update window, with the server stopped, so files always match what the server loaded.",
                 )}
               </span>
-              <Button size="sm" variant="outline" onClick={() => apply.mutate()} disabled={apply.isPending}>
-                {t("Update when empty")}
-              </Button>
+              {control && (
+                <Button size="sm" variant="outline" onClick={() => apply.mutate()} disabled={apply.isPending}>
+                  {t("Update when empty")}
+                </Button>
+              )}
             </AlertDescription>
           </Alert>
         )}

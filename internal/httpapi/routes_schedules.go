@@ -44,16 +44,30 @@ func registerSchedules(api huma.API, d Deps) {
 			out.Body.NextBackupAt, out.Body.NextUpdateCheckAt = d.Sched.NextInternal()
 			return out, nil
 		})
-	huma.Register(api, op("create-schedule", http.MethodPost, "/schedules", "schedules", "Create a schedule", 422),
+	huma.Register(api, op("create-schedule", http.MethodPost, "/schedules", "schedules", "Create a schedule (its action's scope is needed too)", 403, 422),
 		func(ctx context.Context, in *ScheduleBody) (*ScheduleOutput, error) {
+			if err := requireAction(ctx, in.Body.Action); err != nil {
+				return nil, err
+			}
 			s, err := d.Sched.Create(ctx, in.Body)
 			if err != nil {
 				return nil, mapErr(err)
 			}
 			return &ScheduleOutput{Body: s}, nil
 		})
-	huma.Register(api, op("update-schedule", http.MethodPut, "/schedules/{id}", "schedules", "Update a schedule", 404, 422),
+	huma.Register(api, op("update-schedule", http.MethodPut, "/schedules/{id}", "schedules",
+		"Update a schedule (the scopes of its current and new action are needed too)", 403, 404, 422),
 		func(ctx context.Context, in *ScheduleUpdate) (*ScheduleOutput, error) {
+			cur, err := d.Sched.Get(ctx, in.ID)
+			if err != nil {
+				return nil, mapErr(err)
+			}
+			if err := requireAction(ctx, cur.Action); err != nil {
+				return nil, err
+			}
+			if err := requireAction(ctx, in.Body.Action); err != nil {
+				return nil, err
+			}
 			s, err := d.Sched.Update(ctx, in.ID, in.Body)
 			if err != nil {
 				return nil, mapErr(err)
@@ -64,8 +78,15 @@ func registerSchedules(api huma.API, d Deps) {
 		func(ctx context.Context, in *ScheduleIDInput) (*struct{}, error) {
 			return nil, mapErr(d.Sched.Delete(ctx, in.ID))
 		})
-	huma.Register(api, op("run-schedule", http.MethodPost, "/schedules/{id}/run", "schedules", "Run a schedule now", 404),
+	huma.Register(api, op("run-schedule", http.MethodPost, "/schedules/{id}/run", "schedules", "Run a schedule now (its action's scope is needed too)", 403, 404),
 		func(ctx context.Context, in *ScheduleIDInput) (*Accepted, error) {
+			cur, err := d.Sched.Get(ctx, in.ID)
+			if err != nil {
+				return nil, mapErr(err)
+			}
+			if err := requireAction(ctx, cur.Action); err != nil {
+				return nil, err
+			}
 			if err := d.Sched.RunNow(ctx, in.ID); err != nil {
 				return nil, mapErr(err)
 			}
