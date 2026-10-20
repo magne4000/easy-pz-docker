@@ -38,6 +38,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatBytes, formatDate, formatDuration, formatRelative } from "@/lib/format";
+import { modsPageHref } from "@/lib/modsPage";
 import { useCan } from "@/lib/scopes";
 import { cn } from "@/lib/utils";
 
@@ -518,7 +519,7 @@ export default function Dashboard() {
               </CardHeader>
               <CardContent>
                 <Button asChild variant="outline" size="sm">
-                  <a href={sys.data.modsPagePath} target="_blank" rel="noreferrer">
+                  <a href={modsPageHref(sys.data)} target="_blank" rel="noreferrer">
                     <ExternalLink /> {t("Open")}
                   </a>
                 </Button>
