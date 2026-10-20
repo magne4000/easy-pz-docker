@@ -1,0 +1,78 @@
+name: pelican-plugin
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths: ["pelican-plugin/**", ".github/workflows/pelican-plugin.yml"]
+  pull_request:
+    paths: ["pelican-plugin/**", ".github/workflows/pelican-plugin.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: pelican-plugin/easy-pz
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer:v2
+          coverage: none
+      - name: php -l
+        run: find . -name '*.php' -not -path './tests/vendor/*' -print0 | xargs -0 -n1 php -l
+      - name: plugin.json is valid JSON
+        run: jq -e '.id == "easy-pz" and .api_version == 1' plugin.json
+      - run: composer install --no-interaction --no-progress
+        working-directory: pelican-plugin/easy-pz/tests
+      - run: vendor/bin/phpunit
+        working-directory: pelican-plugin/easy-pz/tests
+
+  # Release assets contract: the plugin zip (top-level folder easy-pz/, its
+  # version and pinned pzman set from the tag) and the update feed that the
+  # plugin's update_url points at.
+  package:
+    needs: check
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: pelican-plugin
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package
+        env:
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          version=${TAG#v}
+          jq --arg v "$version" '.version = $v' easy-pz/plugin.json > plugin.json.tmp
+          mv plugin.json.tmp easy-pz/plugin.json
+          sed -i "s/'pzman_version' => '[^']*'/'pzman_version' => '$version'/" easy-pz/config/easy-pz.php
+          grep -q "'pzman_version' => '$version'" easy-pz/config/easy-pz.php
+          mkdir -p dist
+          rm -f dist/easy-pz-pelican-plugin.zip
+          zip -qr dist/easy-pz-pelican-plugin.zip easy-pz -x 'easy-pz/tests/*' 'easy-pz/.gitignore'
+          jq -n --arg v "$version" --arg u "https://github.com/$REPO/releases/download/$TAG/easy-pz-pelican-plugin.zip" \
+            '{"*": {version: $v, download_url: $u}}' > dist/pelican-plugin-update.json
+          unzip -l dist/easy-pz-pelican-plugin.zip
+          cat dist/pelican-plugin-update.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            pelican-plugin/dist/easy-pz-pelican-plugin.zip
+            pelican-plugin/dist/pelican-plugin-update.json
