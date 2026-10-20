@@ -13,6 +13,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** Password login (Docker mode only) */
         post: operations["login"];
         delete?: never;
         options?: never;
@@ -30,6 +31,26 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["logout"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/pelican": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trade a Pelican handoff token for a session (Pelican mode only)
+         * @description The plugin's *Open easy-pz* redirects to `/auth/pelican#t=<token>`; the page posts the token here. Each token works once.
+         */
+        post: operations["login-pelican"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1157,6 +1178,16 @@ export interface components {
             saveDir: string;
             workshopDir: string;
         };
+        PelicanLoginInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/PelicanLoginInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description the handoff token from the #t= fragment of /auth/pelican */
+            token: string;
+        };
         PinInputBody: {
             /**
              * Format: uri
@@ -1452,7 +1483,17 @@ export interface components {
             authenticated: boolean;
             /** Format: date-time */
             expiresAt?: string;
-            user?: string;
+            /**
+             * @description where pzman runs (PZMAN_HOST); pelican: no password login, open easy-pz from Pelican
+             * @enum {string}
+             */
+            host: "docker" | "pelican";
+            /** @description pelican: the panel's URL (PZMAN_PELICAN_PANEL_URL) */
+            pelicanPanelUrl?: string;
+            /** @description what the session may do (permissions contract); every scope for a password session */
+            scopes: ("read" | "control" | "console" | "mods" | "config" | "backups" | "schedules" | "settings")[];
+            /** @description PANEL_ADMIN_USER, or the Pelican username */
+            username?: string;
         };
         Settings: {
             /**
@@ -1712,6 +1753,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -1759,6 +1809,66 @@ export interface operations {
             };
             /** @description Error */
             default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "login-pelican": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PelicanLoginInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionOutputBody"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
