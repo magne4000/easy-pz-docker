@@ -457,6 +457,7 @@ from a URL with a path prefix.
   - *Open easy-pz* runs behind the panel pages' session checks too:
     `AuthenticateSession` (ends with a password change) and
     `RequireTwoFactorAuthentication`.
+  - The handoff takes an optional `?to=<same-origin absolute path>` (≤ 512 chars, no `//`, `\` or control characters; anything else is ignored) and passes it on as `#t=<token>&to=<rawurlencoded path>`, for pzman's session renewal.
   - A UI allocation no longer assigned to the server (an owner can detach
     it) counts as missing: no service call, handoff or proxied request goes
     to that port.
