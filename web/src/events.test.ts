@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { QueryClient } from "@tanstack/react-query";
 import { describe, expect, it, vi } from "vitest";
 import { keys } from "@/api/keys";
-import { dispatch, eventActions } from "@/events";
+import { connectEvents, dispatch, eventActions } from "@/events";
 
 // Pins the topic → query-key table against the server's event union, read
 // from the committed OpenAPI document, so the two cannot drift silently.
@@ -50,5 +50,49 @@ describe("events dispatch table", () => {
     const spy = vi.spyOn(qc, "invalidateQueries");
     dispatch(qc, "task:changed", { id: "x", kind: "backup" });
     expect(spy).toHaveBeenCalledWith({ queryKey: keys.backups });
+  });
+});
+
+describe("connectEvents", () => {
+  it("recreates the stream with a fresh URL (ticket) after an error", async () => {
+    vi.useFakeTimers();
+    const made: {
+      url: string;
+      es: { onopen?: () => void; onerror?: () => void; close: () => void; closed: boolean };
+    }[] = [];
+    class FakeES {
+      onopen?: () => void;
+      onerror?: () => void;
+      closed = false;
+      static CLOSED = 2;
+      constructor(public url: string) {
+        made.push({ url, es: this });
+      }
+      addEventListener() {}
+      close() {
+        this.closed = true;
+      }
+    }
+    vi.stubGlobal("EventSource", FakeES);
+    let n = 0;
+    const states: string[] = [];
+    const qc = new QueryClient();
+    const stop = connectEvents(
+      qc,
+      (s) => states.push(s),
+      async () => `/api/events?ticket=t${++n}`,
+    );
+    await vi.runOnlyPendingTimersAsync();
+    expect(made.map((m) => m.url)).toEqual(["/api/events?ticket=t1"]);
+    made[0].es.onopen?.();
+    made[0].es.onerror?.();
+    expect(made[0].es.closed).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(made.map((m) => m.url)).toEqual(["/api/events?ticket=t1", "/api/events?ticket=t2"]);
+    stop();
+    expect(made[1].es.closed).toBe(true);
+    expect(states).toContain("open");
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 });

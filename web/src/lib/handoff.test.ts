@@ -8,11 +8,11 @@ beforeEach(() => {
   window.history.replaceState({ idx: 3 }, "", "/");
 });
 
-describe("takeHandoffToken", () => {
+describe("takeHandoff", () => {
   it("reads #t= and clears the fragment, keeping path, query and history state", async () => {
-    const { takeHandoffToken } = await load();
+    const { takeHandoff } = await load();
     window.history.replaceState({ idx: 3 }, "", "/auth/pelican?x=1#t=abc.def-ghi");
-    expect(takeHandoffToken()).toBe("abc.def-ghi");
+    expect(takeHandoff()).toEqual({ token: "abc.def-ghi", to: null });
     expect(window.location.pathname).toBe("/auth/pelican");
     expect(window.location.search).toBe("?x=1");
     expect(window.location.hash).toBe("");
@@ -20,34 +20,55 @@ describe("takeHandoffToken", () => {
   });
 
   it("returns empty without a token, still clearing any fragment", async () => {
-    const { takeHandoffToken } = await load();
+    const { takeHandoff } = await load();
     window.history.replaceState(null, "", "/auth/pelican");
-    expect(takeHandoffToken()).toBe("");
+    expect(takeHandoff().token).toBe("");
     window.history.replaceState(null, "", "/auth/pelican#other=1");
-    expect(takeHandoffToken()).toBe("");
+    expect(takeHandoff().token).toBe("");
     expect(window.location.hash).toBe("");
     window.history.replaceState(null, "", "/auth/pelican#t=");
-    expect(takeHandoffToken()).toBe("");
+    expect(takeHandoff().token).toBe("");
   });
 
   it("decodes the token like a query value", async () => {
-    const { takeHandoffToken } = await load();
+    const { takeHandoff } = await load();
     window.history.replaceState(null, "", "/auth/pelican#t=a%2Bb");
-    expect(takeHandoffToken()).toBe("a+b");
+    expect(takeHandoff().token).toBe("a+b");
+  });
+
+  it("keeps `to` only when it is a path on this origin", async () => {
+    const { takeHandoff } = await load();
+    const to = (raw: string) => {
+      window.history.replaceState(null, "", `/auth/pelican#t=x&to=${raw}`);
+      return takeHandoff().to;
+    };
+    expect(to(encodeURIComponent("/mods?tab=2"))).toBe("/mods?tab=2");
+    expect(to("%2Fbackups")).toBe("/backups");
+    for (const bad of [
+      "//evil.example/x",
+      "https://evil.example/",
+      "/\\evil.example",
+      "javascript:alert(1)",
+      "mods",
+      "/a%0Ab",
+    ]) {
+      expect(to(encodeURIComponent(decodeURIComponent(bad))), bad).toBeNull();
+    }
   });
 });
 
 describe("handoffOnce", () => {
   it("posts the token exactly once across repeated calls (StrictMode)", async () => {
     const { handoffOnce } = await load();
-    window.history.replaceState(null, "", "/auth/pelican#t=tok");
+    window.history.replaceState(null, "", "/auth/pelican#t=tok&to=%2Fmods");
     const post = vi.fn(async (token: string) => ({ token }));
     const first = handoffOnce(post);
     const second = handoffOnce(post);
     expect(post).toHaveBeenCalledTimes(1);
     expect(post).toHaveBeenCalledWith("tok");
     expect(second).toBe(first);
-    await expect(first).resolves.toEqual({ token: "tok" });
+    expect(first?.to).toBe("/mods");
+    await expect(first?.result).resolves.toEqual({ token: "tok" });
     expect(window.location.hash).toBe("");
   });
 
@@ -56,7 +77,7 @@ describe("handoffOnce", () => {
     window.history.replaceState(null, "", "/auth/pelican#t=tok");
     const post = vi.fn(() => Promise.reject(new Error("token already used")));
     const first = handoffOnce(post);
-    await expect(first).rejects.toThrow("token already used");
+    await expect(first?.result).rejects.toThrow("token already used");
     expect(handoffOnce(post)).toBe(first);
     expect(post).toHaveBeenCalledTimes(1);
   });
@@ -68,9 +89,9 @@ describe("handoffOnce", () => {
     expect(handoffOnce(post)).toBeNull();
     expect(post).not.toHaveBeenCalled();
     window.history.replaceState(null, "", "/auth/pelican#t=one");
-    await expect(handoffOnce(post)).resolves.toBe("one");
+    await expect(handoffOnce(post)?.result).resolves.toBe("one");
     window.history.replaceState(null, "", "/auth/pelican#t=two");
-    await expect(handoffOnce(post)).resolves.toBe("two");
+    await expect(handoffOnce(post)?.result).resolves.toBe("two");
     expect(post).toHaveBeenCalledTimes(2);
   });
 });

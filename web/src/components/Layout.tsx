@@ -20,6 +20,7 @@ import { NavLink } from "react-router-dom";
 import { api } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useServerStatus, useSession, useSystem } from "@/api/queries";
+import { setSessionToken } from "@/api/session";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,6 +106,7 @@ export function Layout({ children, connection }: { children: ReactNode; connecti
 
   const logout = async () => {
     await api.POST("/auth/logout");
+    setSessionToken(null);
     qc.clear();
     qc.invalidateQueries({ queryKey: keys.session });
   };

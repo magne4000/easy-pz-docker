@@ -1,7 +1,8 @@
 import { Archive, Download, FileText, History, Pin, PinOff, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, unwrap } from "@/api/client";
+import { toast } from "sonner";
+import { api, ticketed, unwrap } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useAction, useBackup, useBackups } from "@/api/queries";
 import { Confirm } from "@/components/Confirm";
@@ -292,7 +293,25 @@ export default function Backups() {
                             {b.pinned ? <PinOff /> : <Pin />}
                           </Button>
                           <Button variant="ghost" size="icon" asChild title={t("Download")}>
-                            <a href={`/api/backups/${b.id}/download`} download>
+                            <a
+                              href={`/api/backups/${b.id}/download`}
+                              download
+                              onClick={(e) => {
+                                // A Pelican session has no cookie: the link needs a ticket.
+                                const link = e.currentTarget;
+                                if (link.search) return;
+                                e.preventDefault();
+                                ticketed(`/api/backups/${b.id}/download`).then(
+                                  (url) => {
+                                    const a = document.createElement("a");
+                                    a.href = url;
+                                    a.download = "";
+                                    a.click();
+                                  },
+                                  (err: Error) => toast.error(err.message),
+                                );
+                              }}
+                            >
                               <Download />
                             </a>
                           </Button>

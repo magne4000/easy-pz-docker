@@ -211,6 +211,10 @@ export default function Schedules() {
     { invalidate: [keys.schedules] },
   );
   const edit = useCan("schedules");
+  const control = useCan("control");
+  const backups = useCan("backups");
+  // A schedule's action needs its own scope too (the server refuses it otherwise).
+  const mayAct = (action: string) => edit && (action === "backup" ? backups : control);
   const d = q.data;
   return (
     <div>
@@ -269,7 +273,7 @@ export default function Schedules() {
                     <Switch
                       checked={s.enabled}
                       onCheckedChange={() => toggle.mutate(s)}
-                      disabled={!edit}
+                      disabled={!mayAct(s.action)}
                       aria-label={t("Enabled")}
                     />
                   </TableCell>
@@ -299,22 +303,26 @@ export default function Schedules() {
                   {edit && (
                     <TableCell>
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t("Run now")}
-                          onClick={() => run.mutate(s.id)}
-                        >
-                          <Play />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title={t("Edit")}
-                          onClick={() => setEditing({ ...s })}
-                        >
-                          <Pencil />
-                        </Button>
+                        {mayAct(s.action) && (
+                          <>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title={t("Run now")}
+                              onClick={() => run.mutate(s.id)}
+                            >
+                              <Play />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title={t("Edit")}
+                              onClick={() => setEditing({ ...s })}
+                            >
+                              <Pencil />
+                            </Button>
+                          </>
+                        )}
                         <Confirm
                           trigger={
                             <Button variant="ghost" size="icon" title={t("Delete")}>

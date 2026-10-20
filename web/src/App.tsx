@@ -6,6 +6,7 @@ import { Route, Routes, useMatch } from "react-router-dom";
 import { onUnauthorized } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSession } from "@/api/queries";
+import { sessionToken, startRenewal } from "@/api/session";
 import { Layout } from "@/components/Layout";
 import { type ConnectionState, connectEvents } from "@/events";
 import { Login } from "@/pages/Login";
@@ -71,8 +72,18 @@ export function App() {
   // Pelican's sign-in handoff works whether or not a session exists yet.
   const handoff = useMatch("/auth/pelican");
   useEffect(() => onUnauthorized(() => qc.invalidateQueries({ queryKey: keys.session })), [qc]);
+  // A Pelican session ends after an hour (or when pzman restarts): sign in
+  // again through the panel, which re-checks the permissions and brings the
+  // browser back to this page.
+  const s = session.data;
+  const renewing = !handoff && !!s && !s.authenticated && !!s.pelicanOpenUrl && !!sessionToken();
+  useEffect(() => {
+    if (renewing && s?.pelicanOpenUrl && !startRenewal(s.pelicanOpenUrl)) {
+      qc.invalidateQueries({ queryKey: keys.session }); // renewed moments ago: show the sign-in page
+    }
+  }, [renewing, s?.pelicanOpenUrl, qc]);
   if (handoff) return <PelicanHandoff />;
-  if (session.isPending) return session.failureCount > 0 ? <WaitingForBackend /> : <Spinner />;
+  if (session.isPending || renewing) return session.failureCount > 0 ? <WaitingForBackend /> : <Spinner />;
   if (!session.data?.authenticated) return <Login />;
   return <Authenticated />;
 }

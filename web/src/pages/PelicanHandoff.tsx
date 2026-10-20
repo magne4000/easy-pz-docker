@@ -6,12 +6,14 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, unwrap } from "@/api/client";
 import { keys } from "@/api/keys";
 import { useSession } from "@/api/queries";
+import { setSessionToken } from "@/api/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { handoffOnce } from "@/lib/handoff";
 
 // PelicanHandoff signs in with the token Pelican's "Open easy-pz" put in the
-// URL fragment (/auth/pelican#t=<token>), then continues to the dashboard.
+// URL fragment (/auth/pelican#t=<token>[&to=<path>]), keeps the session token
+// it gets back (no cookie on Pelican), then continues to `to` or the dashboard.
 export function PelicanHandoff() {
   const { t } = useTranslation();
   const qc = useQueryClient();
@@ -29,18 +31,22 @@ export function PelicanHandoff() {
   // biome-ignore lint/correctness/useExhaustiveDependencies: visit re-reads the fragment
   useEffect(() => {
     let current = true;
-    const signIn = handoffOnce((token) => unwrap(api.POST("/auth/pelican", { body: { token } })));
+    const signIn = handoffOnce(async (token) => {
+      const { token: session, ...s } = await unwrap(api.POST("/auth/pelican", { body: { token } }));
+      setSessionToken(session ?? null);
+      return s;
+    });
     if (!signIn) {
       setError(t("No sign-in token: open easy-pz again from the Pelican panel."));
       return;
     }
     setError("");
-    signIn.then(
+    signIn.result.then(
       (s) => {
         if (!current) return;
         qc.setQueryData(keys.session, s);
-        qc.invalidateQueries({ queryKey: keys.session });
-        navigate("/", { replace: true });
+        qc.invalidateQueries();
+        navigate(signIn.to ?? "/", { replace: true });
       },
       (err: Error) => current && setError(err.message),
     );

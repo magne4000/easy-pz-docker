@@ -34,7 +34,15 @@ function Field({
   readOnly: boolean;
   onChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   const kind = kindOf(entry.value);
+  if (entry.redacted) {
+    return (
+      <p className="text-muted-foreground px-3 py-1.5 text-xs italic">
+        {t("Hidden: needs the config permission")}
+      </p>
+    );
+  }
   if (entry.managed) {
     return (
       <p className="bg-muted rounded-md px-3 py-1.5 font-mono text-xs break-all">{entry.value || "—"}</p>

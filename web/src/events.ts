@@ -1,5 +1,5 @@
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
-import type { Schemas } from "@/api/client";
+import { type Schemas, ticketed } from "@/api/client";
 import { keys } from "@/api/keys";
 import type { operations } from "@/api/schema";
 
@@ -66,28 +66,65 @@ export function dispatch(qc: QueryClient, name: string, data: unknown) {
 
 export type ConnectionState = "connecting" | "open" | "closed";
 
-// connectEvents opens the single EventSource. The browser reconnects on its
-// own; on every (re)open we refetch everything, since events may have been missed.
-export function connectEvents(qc: QueryClient, onState: (s: ConnectionState) => void): () => void {
-  const es = new EventSource("/api/events", { withCredentials: true });
+// connectEvents keeps the single EventSource open. Its URL may carry a
+// single-use ticket (Pelican sessions send no cookie), so the browser's own
+// reconnect cannot be used: on error it is closed and recreated, with a fresh
+// ticket, after a growing delay. On every reopen we refetch everything, since
+// events may have been missed.
+export function connectEvents(
+  qc: QueryClient,
+  onState: (s: ConnectionState) => void,
+  url: () => Promise<string> = () => ticketed("/api/events"),
+): () => void {
+  let es: EventSource | null = null;
+  let stopped = false;
   let opened = false;
-  onState("connecting");
-  es.onopen = () => {
-    onState("open");
-    if (opened) qc.invalidateQueries();
-    opened = true;
+  let delay = 1000;
+  let timer: number | undefined;
+  const retry = () => {
+    onState("connecting");
+    timer = window.setTimeout(connect, delay);
+    delay = Math.min(delay * 2, 15_000);
   };
-  es.onerror = () => onState(es.readyState === EventSource.CLOSED ? "closed" : "connecting");
-  for (const name of Object.keys(eventActions)) {
-    es.addEventListener(name, (ev) => {
-      let data: unknown = null;
-      try {
-        data = JSON.parse((ev as MessageEvent).data);
-      } catch {
-        return;
-      }
-      dispatch(qc, name, data);
-    });
-  }
-  return () => es.close();
+  const connect = async () => {
+    if (stopped) return;
+    onState("connecting");
+    let src: string;
+    try {
+      src = await url();
+    } catch {
+      if (!stopped) retry(); // a 401 also tells the app, which renews the session
+      return;
+    }
+    if (stopped) return;
+    const current = new EventSource(src, { withCredentials: true });
+    es = current;
+    current.onopen = () => {
+      onState("open");
+      delay = 1000;
+      if (opened) qc.invalidateQueries();
+      opened = true;
+    };
+    current.onerror = () => {
+      current.close();
+      if (!stopped && es === current) retry();
+    };
+    for (const name of Object.keys(eventActions)) {
+      current.addEventListener(name, (ev) => {
+        let data: unknown = null;
+        try {
+          data = JSON.parse((ev as MessageEvent).data);
+        } catch {
+          return;
+        }
+        dispatch(qc, name, data);
+      });
+    }
+  };
+  void connect();
+  return () => {
+    stopped = true;
+    window.clearTimeout(timer);
+    es?.close();
+  };
 }
