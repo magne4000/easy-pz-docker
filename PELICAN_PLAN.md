@@ -372,7 +372,9 @@ What changed in the plan:
       the game version lock.
 - [ ] Release: static `pzman-linux-amd64` (and `-arm64` for local development)
       plus `pzman-SHA256SUMS` attached to each `v*` release (release assets
-      contract above).
+      contract above). Implemented (`ci.yml` job `release`, the plugin's
+      `pelican-plugin.yml` job `package`); the build steps ran locally, the
+      upload itself first runs on the next `v*` tag.
 
 Done when, on the stock egg: Pelican's Start reaches `SERVER STARTED`; `players`
 typed in Pelican's console prints the reply; Stop saves and exits 0; an update
@@ -527,7 +529,7 @@ to the stock egg with the world intact.
       Docker-mode run (two tracked mods, one backup) moved into the layout and
       started the Wings way passed the self-check, relinked the mods, listed
       and restored the backup. README: the steps with commands.
-- [ ] End-to-end on x86 (CI branch or the NAS): Pelican compose + plugin + stock
+- [x] End-to-end on x86 (CI branch or the NAS): Pelican compose + plugin + stock
       egg + Enable + mod install + update window + launcher download + Stop.
       `pelican/e2e.sh` (stages `setup plugin pz easypz`) and the workflow
       `pelican-e2e` (on demand, or PRs labelled `pelican-e2e`). The old
@@ -538,7 +540,8 @@ to the stock egg with the world intact.
       with `easy-pz.read` only gets 403 on a write; a cut pack download
       resumes through the panel. `PZ_EXTRA_ENV` adds egg variables;
       `SKIP_INSTALL=1` with `PANEL_DRIVERS=fake` runs the plugin path on
-      OrbStack.
+      OrbStack. Passed on this phase's PR (43 checks, real game, Pelican and
+      Wings v1.0.0-rc.1, GitHub-hosted x86 runner).
 - [x] Pelican compose in the docs: mount `panel/plugins` on
       `/var/www/html/plugins` (the panel image does not keep plugins otherwise).
       `pelican/compose.yml` + `pelican/init.sh`. The image entrypoint creates
