@@ -128,6 +128,10 @@ class EasyPzPage extends Page
             $this->pzmanError = $exception->getMessage();
             $this->unreachable = $exception->unreachable;
         }
+
+        // Resolving an action builds the page schema before the action runs; the
+        // cached one still holds the previous status.
+        $this->cacheSchema('content', null);
     }
 
     public function content(Schema $schema): Schema
