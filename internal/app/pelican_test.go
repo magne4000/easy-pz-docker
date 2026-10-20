@@ -3,9 +3,18 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+)
+
+// pelicanBase is the pzman.env the plugin writes (contract), minus the ports.
+const (
+	testServer  = "9c3b6a3e-2f1d-4f6e-9a51-0d2b8c7e4a10"
+	testKey     = "03a107bff3ce10be1d70dd18e74bc09967e4d6309ba50d5f1ddc8664125531b8"
+	pelicanBase = "PZMAN_HOST=pelican\nPZMAN_PELICAN_SERVER=" + testServer + "\nPZMAN_PELICAN_PUBLIC_KEY=" + testKey +
+		"\nPZMAN_PELICAN_PANEL_URL=https://panel.example.com\n"
 )
 
 // server lays out <tmp>/home/container/.easy-pz/ with an optional pzman.env
@@ -64,7 +73,7 @@ func TestLoadReportsSource(t *testing.T) {
 	require.ErrorContains(t, err, "PANEL_PORT from "+filepath.Join(filepath.Dir(exe), EnvFileName))
 	require.ErrorContains(t, err, "PANEL_DRIVERS from the environment")
 
-	_, exe = server(t, "PZMAN_HOST=pelican\nPANEL_ADMIN_PASSWORD_HASH="+testHash+"\n")
+	_, exe = server(t, pelicanBase)
 	_, err = load([]string{"SERVER_PORT=abc", "SERVER_MEMORY=lots"}, exe)
 	require.ErrorContains(t, err, "DEFAULT_PORT from SERVER_PORT from the environment")
 	require.ErrorContains(t, err, `SERVER_MEMORY "lots" is not a number of MiB (from the environment)`)
@@ -75,7 +84,7 @@ func TestLoadReportsSource(t *testing.T) {
 }
 
 func TestPelicanPrecedence(t *testing.T) {
-	const base = "PZMAN_HOST=pelican\nPANEL_ADMIN_PASSWORD_HASH=" + testHash + "\n"
+	const base = pelicanBase
 	type got struct {
 		port, udp, xmx int
 		admin, branch  string
@@ -130,7 +139,7 @@ func TestPelicanPrecedence(t *testing.T) {
 }
 
 func TestPelicanPathDefaults(t *testing.T) {
-	root, exe := server(t, "PZMAN_HOST=pelican\nPANEL_ADMIN_PASSWORD_HASH="+testHash+"\n")
+	root, exe := server(t, pelicanBase)
 	cfg, err := load(nil, exe)
 	require.NoError(t, err)
 	require.True(t, cfg.Pelican())
@@ -145,7 +154,7 @@ func TestPelicanPathDefaults(t *testing.T) {
 	require.Equal(t, filepath.Join(root, "steamcmd", "steamcmd.sh"), cfg.SteamCMD)
 	require.Equal(t, "linux64", cfg.SteamPlatform)
 
-	root, exe = server(t, "PZMAN_HOST=pelican\nPANEL_ADMIN_PASSWORD_HASH="+testHash+"\nPANEL_STEAMCMD=./tools/steamcmd.sh\n")
+	root, exe = server(t, pelicanBase+"PANEL_STEAMCMD=./tools/steamcmd.sh\n")
 	cfg, err = load([]string{"PANEL_BACKUP_DIR=/mnt/backups", "STEAM_PLATFORM=custom"}, exe)
 	require.NoError(t, err)
 	require.Equal(t, filepath.Join(root, "tools", "steamcmd.sh"), cfg.SteamCMD, "relative paths are from the root")
@@ -163,4 +172,50 @@ func TestEggAutoUpdateOn(t *testing.T) {
 	require.True(t, Config{Host: HostPelican, EggAutoUpdate: "1"}.EggAutoUpdateOn())
 	require.False(t, Config{Host: HostPelican, EggAutoUpdate: "0"}.EggAutoUpdateOn())
 	require.False(t, Config{Host: HostDocker, EggAutoUpdate: "1"}.EggAutoUpdateOn(), "docker mode has no egg")
+}
+
+func TestPelicanSettings(t *testing.T) {
+	_, exe := server(t, pelicanBase+"PANEL_PUBLIC_URL=https://panel.example.com/easy-pz/abcd1234\n")
+	cfg, err := load(nil, exe)
+	require.NoError(t, err, "no PANEL_ADMIN_PASSWORD_HASH needed in Pelican mode")
+	require.Equal(t, testServer, cfg.PelicanServer)
+	require.Equal(t, testKey, cfg.PelicanPublicKey)
+	require.Equal(t, "https://panel.example.com", cfg.PelicanPanelURL)
+	require.Equal(t, "/easy-pz/abcd1234", cfg.PublicPath())
+
+	_, exe = server(t, "PZMAN_HOST=pelican\n")
+	_, err = load(nil, exe)
+	require.ErrorContains(t, err, "PZMAN_PELICAN_SERVER is required in Pelican mode")
+	require.ErrorContains(t, err, "PZMAN_PELICAN_PUBLIC_KEY is required in Pelican mode")
+	require.ErrorContains(t, err, "PZMAN_PELICAN_PANEL_URL is required in Pelican mode")
+	require.NotContains(t, err.Error(), "PANEL_ADMIN_PASSWORD_HASH")
+
+	upper := strings.ToUpper(testKey)
+	_, exe = server(t, "PZMAN_HOST=pelican\nPZMAN_PELICAN_SERVER=srv-1\nPZMAN_PELICAN_PUBLIC_KEY="+upper+
+		"\nPANEL_PUBLIC_URL=https://panel.example.com/easy-pz/a?b\n")
+	_, err = load([]string{"PZMAN_PELICAN_PANEL_URL=ftp://panel.example.com"}, exe)
+	file := filepath.Join(filepath.Dir(exe), EnvFileName)
+	require.ErrorContains(t, err, `PZMAN_PELICAN_SERVER must be the server's UUID, got "srv-1" (PZMAN_PELICAN_SERVER from `+file+")")
+	require.ErrorContains(t, err, `PZMAN_PELICAN_PUBLIC_KEY must be an Ed25519 public key as 64 lowercase hex characters, got "`+upper+
+		`" (PZMAN_PELICAN_PUBLIC_KEY from `+file+")")
+	require.ErrorContains(t, err, `PZMAN_PELICAN_PANEL_URL must be http(s)://host[:port][/path], got "ftp://panel.example.com" (PZMAN_PELICAN_PANEL_URL from the environment)`)
+	require.ErrorContains(t, err, "PANEL_PUBLIC_URL must be http(s)://host[:port][/path]")
+}
+
+func TestPublicURLPathPelicanOnly(t *testing.T) {
+	c := Config{Host: HostPelican, PelicanServer: testServer, PelicanPublicKey: testKey, PelicanPanelURL: "https://p.example.com/",
+		Drivers: DriversReal, CookieSecure: CookieSecureAuto, LogLevel: "info", Port: 8080, ConsoleRing: 10, ServerName: "s"}
+	for _, ok := range []string{"https://p.example.com/easy-pz/abcd1234", "https://p.example.com/easy-pz/abcd1234/", "http://[::1]:8080/x"} {
+		c.PublicURL = ok
+		require.NoError(t, c.Validate(), ok)
+	}
+	for _, bad := range []string{"https://p.example.com/a&b", "https://p.example.com/a'b", "https://p.example.com/x#y", "https://u@p.example.com/x"} {
+		c.PublicURL = bad
+		require.ErrorContains(t, c.Validate(), "PANEL_PUBLIC_URL", bad)
+	}
+	c.Host, c.AdminHash = HostDocker, testHash
+	c.PublicURL = "https://p.example.com/easy-pz/abcd1234"
+	require.ErrorContains(t, c.Validate(), "PANEL_PUBLIC_URL must be http(s)://host[:port]", "Docker mode: an origin only")
+	require.Empty(t, Config{PublicURL: "https://pz.example.com/"}.PublicPath())
+	require.Equal(t, "/easy-pz/x", Config{PublicURL: "https://pz.example.com/easy-pz/x/"}.PublicPath())
 }

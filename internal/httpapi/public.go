@@ -198,7 +198,7 @@ func registerPublic(a *fiber.App, d Deps, log *slog.Logger) {
 		out.StatusMessage = statusMessages[out.Status]
 		out.Connect = publicConnect(d)
 		out.Launcher = publicLauncher(d)
-		if o := d.Cfg.PublicOrigin(); o != "" {
+		if o := d.Cfg.PublicBase(); o != "" {
 			out.PageURL = o + base
 		}
 		out.GameVersion = serverGameVersion.get(serverJar(d))

@@ -322,7 +322,7 @@ func registerSystem(api huma.API, d Deps) {
 			b.Timezone, b.Time, b.PUID, b.PGID, b.Branch = d.Cfg.Timezone, time.Now().UTC(), d.Cfg.PUID, d.Cfg.PGID, d.Cfg.ServerBranch
 			b.Disks = d.Disk.Snapshot()
 			b.DiskLevel = string(sys.Worst(b.Disks))
-			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicOrigin()
+			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicBase()
 			b.Subscribers = d.Bus.Stats().Subscribers
 			b.Host = string(app.HostDocker)
 			if d.Cfg.Pelican() {
