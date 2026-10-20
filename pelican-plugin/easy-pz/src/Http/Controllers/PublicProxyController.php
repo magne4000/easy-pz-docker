@@ -87,7 +87,7 @@ class PublicProxyController extends Controller
             return $this->plain(502, 'This server\'s mod page is not reachable right now.');
         }
 
-        $out = ProxyRequest::passBack($upstream->getHeaders()) + ['X-Accel-Buffering' => 'no'];
+        $out = ProxyRequest::responseHeaders($upstream->getHeaders()) + ['X-Accel-Buffering' => 'no'];
         $body = $upstream->getBody();
 
         return response()->stream(fn () => $this->pump($body, $lock), $upstream->getStatusCode(), $out);
@@ -132,7 +132,7 @@ class PublicProxyController extends Controller
     /** @param  array<string, string>  $headers */
     private function plain(int $status, string $message, array $headers = []): Response
     {
-        return response($message, $status, $headers + [
+        return response($message, $status, ProxyRequest::ISOLATION + $headers + [
             'Content-Type' => 'text/plain; charset=utf-8',
             'Cache-Control' => 'no-store',
             'X-Robots-Tag' => 'noindex, nofollow',

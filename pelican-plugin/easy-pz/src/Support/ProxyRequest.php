@@ -17,6 +17,18 @@ final class ProxyRequest
     /** Methods of the mods route; the assets route is GET/HEAD only. */
     public const MODS_METHODS = ['GET', 'HEAD', 'POST'];
 
+    /**
+     * Set on every proxied response, over anything pzman sends: the content
+     * comes from the server's container, which its owner controls, so it must
+     * never run with the panel's origin. The sandbox gives the page an opaque
+     * origin; CORS lets it still load its own scripts and data.json.
+     */
+    public const ISOLATION = [
+        'Content-Security-Policy' => 'sandbox allow-scripts allow-downloads allow-popups',
+        'X-Content-Type-Options' => 'nosniff',
+        'Access-Control-Allow-Origin' => '*',
+    ];
+
     /** Response headers passed back to the client. */
     public const PASS_BACK = [
         'Content-Type',
@@ -79,6 +91,18 @@ final class ProxyRequest
         }
 
         return $out;
+    }
+
+    /**
+     * The headers of a proxied response: what pzman sent from PASS_BACK, then the
+     * isolation headers, which win.
+     *
+     * @param  array<string, list<string>|string>  $headers  response headers, any case
+     * @return array<string, string>
+     */
+    public static function responseHeaders(array $headers): array
+    {
+        return self::ISOLATION + self::passBack($headers);
     }
 
     /**

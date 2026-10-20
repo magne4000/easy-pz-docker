@@ -45,6 +45,25 @@ final class ProxyTest extends TestCase
         ], $out);
     }
 
+    public function testResponseHeadersIsolateThePanelOrigin(): void
+    {
+        $out = ProxyRequest::responseHeaders([
+            'Content-Type' => ['text/html'],
+            'Content-Security-Policy' => ["default-src 'self'"],
+            'x-content-type-options' => 'sniff-me',
+            'Access-Control-Allow-Origin' => 'https://evil.example',
+            'Access-Control-Allow-Credentials' => 'true',
+            'Set-Cookie' => 'panel_session=x',
+        ]);
+
+        self::assertSame([
+            'Content-Security-Policy' => 'sandbox allow-scripts allow-downloads allow-popups',
+            'X-Content-Type-Options' => 'nosniff',
+            'Access-Control-Allow-Origin' => '*',
+            'Content-Type' => 'text/html',
+        ], $out);
+    }
+
     public function testForwardHeaders(): void
     {
         $client = [
