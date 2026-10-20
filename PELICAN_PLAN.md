@@ -509,25 +509,56 @@ to the stock egg with the world intact.
 
 ### Phase 4: migration, docs, end-to-end
 
-- [ ] Migration from the compose deployment: `files/` → server root, `data/` →
+- [x] Migration from the compose deployment: `files/` → server root, `data/` →
       `.cache/`, `backups/` → `.easy-pz/backups/`, `chown -R 568:568`;
       allocations 16261 and 16262 plus the UI port. Before that, check whether
       `pzman.db` stores absolute paths (`/project-zomboid…`); if so, a one-time
       rewrite at first Pelican boot.
+      No rewrite needed: the database holds no path (backups are file names
+      in the backup dir; settings are JSON without paths), nor do the launch
+      JSON, the server `.ini` or SteamCMD's manifests. The mirrors in
+      `.cache/mods/` (file links and `.pzman-mirror`) are absolute
+      (`/project-zomboid/steamapps/workshop/…`), but PreStart reconciles them
+      before the missing-mod self-check, so the first Pelican start relinks
+      them into `/home/container`. `pzman.db*` moves to `.easy-pz/` (its WAL
+      with it). The `.ini` keeps its ports (seeded only when missing), hence
+      the same allocations; `USE_STEAM=false` and other pzman variables reach
+      pzman as egg variables (environment). Proven with fake drivers: a
+      Docker-mode run (two tracked mods, one backup) moved into the layout and
+      started the Wings way passed the self-check, relinked the mods, listed
+      and restored the backup. README: the steps with commands.
 - [ ] End-to-end on x86 (CI branch or the NAS): Pelican compose + plugin + stock
       egg + Enable + mod install + update window + launcher download + Stop.
-- [ ] Pelican compose in the docs: mount `panel/plugins` on
+      `pelican/e2e.sh` (stages `setup plugin pz easypz`) and the workflow
+      `pelican-e2e` (on demand, or PRs labelled `pelican-e2e`). The old
+      `phase1` stage (pzman deployed by hand, password login) is gone: Pelican
+      mode has no password login; its checks (console, `players`, no JSON on
+      stdout, `.pelicanignore`, Stop refused, Stop exits 0 without crash
+      handling) run after Enable with the Pelican session. Added: a subuser
+      with `easy-pz.read` only gets 403 on a write; a cut pack download
+      resumes through the panel. `PZ_EXTRA_ENV` adds egg variables;
+      `SKIP_INSTALL=1` with `PANEL_DRIVERS=fake` runs the plugin path on
+      OrbStack.
+- [x] Pelican compose in the docs: mount `panel/plugins` on
       `/var/www/html/plugins` (the panel image does not keep plugins otherwise).
-- [ ] README: a Pelican section (egg feature, plugin install, Enable,
+      `pelican/compose.yml` + `pelican/init.sh`. The image entrypoint creates
+      `/pelican-data/plugins` (the same host directory) and init's `chown -R`
+      gives it to www-data, so both `p:plugin:install` and the panel's
+      zip import write there; verified on OrbStack, including a recreate.
+- [x] README: a Pelican section (egg feature, plugin install, Enable,
       permissions, migration, a memory limit on PZ servers).
 
 ### Local development loop (Apple Silicon)
 
 The egg's game image is amd64-only, but pzman has fake drivers
-(`PANEL_DRIVERS=fake`). The Pelican compose from the smoke test runs on
-OrbStack; a server from any arm64-capable egg running `pzman-linux-arm64` in
-fake mode exercises the plugin, the handoff, permissions and the public proxy
-without PZ. The real game path is tested on x86 only.
+(`PANEL_DRIVERS=fake`). `pelican/compose.yml` runs on OrbStack, and so does
+`pelican/e2e.sh` with the stock egg in fake mode: pull its yolk image first
+(`docker pull --platform linux/amd64 ghcr.io/parkervcp/steamcmd:debian`; Wings
+pulls for the host's platform) and run it with `SUDO= HOST_IP=<Mac LAN IP>
+SKIP_INSTALL=1 PZ_EXTRA_ENV="PANEL_DRIVERS=fake USE_STEAM=false"
+MOD_ID=2478768005` and a `pzman-linux-amd64` build. Every check passes but
+"world saved on Stop" (the fake game saves on its ticks, not on quit) and the
+stock start after Disable (no game). The real game path is tested on x86 only.
 
 ## Risks and open questions
 
