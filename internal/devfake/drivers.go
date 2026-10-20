@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -96,9 +97,21 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	}
 	pid := 4000 + rand.IntN(5000)
 	s.set(gen, pz.StateStarting, func(st *pz.Status) { st.PID = pid; st.StartedAt = time.Now().UTC() })
-	s.line("[fake] ./start-server.sh %s", strings.Join(args, " "))
+	s.line("[fake] ./start-server.sh %s", strings.Join(maskPassword(args), " "))
 	go s.boot(gen)
 	return nil
+}
+
+// maskPassword hides -adminpassword's value: console lines reach the
+// container's stdout, which every Pelican console viewer sees.
+func maskPassword(args []string) []string {
+	out := slices.Clone(args)
+	for i := range len(out) - 1 {
+		if out[i] == "-adminpassword" {
+			out[i+1] = "***"
+		}
+	}
+	return out
 }
 
 func (s *Supervisor) boot(gen int) {
