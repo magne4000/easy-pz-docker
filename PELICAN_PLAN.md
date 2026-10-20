@@ -302,7 +302,8 @@ What changed in the plan:
       limit is not 0. One documented precedence order, tested.
       Order (`internal/app/pelican.go`): environment > `pzman.env` > egg alias
       or derived heap > layout default > built-in default; a pzman variable set
-      anywhere beats its egg alias. Heap: `max(1, floor(SERVER_MEMORY × 0.75 / 1024))`
+      anywhere beats its egg alias (empty counts as unset when the variable has
+      a built-in default). Heap: `max(1, floor(SERVER_MEMORY × 0.75 / 1024))`
       GiB (6144 MiB → 4 GiB).
 - [x] Console: every console-ring line (game, `[steamcmd]`, pzman events) also
       to stdout as plain text; pzman's JSON logs to `.easy-pz/logs/` instead of

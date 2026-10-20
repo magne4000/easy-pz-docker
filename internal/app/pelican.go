@@ -31,7 +31,9 @@ const EnvFileName = "pzman.env"
 //  5. the envDefault tag.
 //
 // So an explicit pzman variable (DEFAULT_PORT) beats its egg alias
-// (SERVER_PORT) wherever each one is set.
+// (SERVER_PORT) wherever each one is set. An empty value counts as unset for
+// variables with a built-in default (DEFAULT_PORT=), and as set for the others
+// (SERVER_BRANCH= is the public branch).
 
 // eggAliases maps the stock PZ egg's variables onto pzman's (Pelican mode).
 var eggAliases = []struct{ egg, key string }{
@@ -87,14 +89,14 @@ func gatherVars(environ []string, exe string) (map[string]string, sources, error
 	}
 	var errs []error
 	for _, a := range eggAliases {
-		if _, explicit := vars[a.key]; explicit {
+		if explicit(vars, a.key) {
 			continue
 		}
 		if v := vars[a.egg]; v != "" {
 			vars[a.key], src[a.key] = v, a.egg+" from "+src[a.egg]
 		}
 	}
-	if _, explicit := vars["MEMORY_XMX_GB"]; !explicit {
+	if !explicit(vars, "MEMORY_XMX_GB") {
 		if s := vars["SERVER_MEMORY"]; s != "" {
 			mib, err := strconv.Atoi(s)
 			switch {
@@ -165,6 +167,28 @@ var fieldKeys = func() map[string]string {
 	}
 	return out
 }()
+
+// defaulted lists the variables with an envDefault: empty, they take it.
+var defaulted = func() map[string]bool {
+	out := map[string]bool{}
+	t := reflect.TypeFor[Config]()
+	for i := range t.NumField() {
+		if _, ok := t.Field(i).Tag.Lookup("envDefault"); ok {
+			key, _, _ := strings.Cut(t.Field(i).Tag.Get("env"), ",")
+			out[key] = true
+		}
+	}
+	return out
+}()
+
+// explicit reports whether key is set for the alias and heap precedence. An
+// empty value counts only for keys without a default (SERVER_BRANCH= picks
+// the public branch); an empty DEFAULT_PORT= would fall back to its built-in
+// default, which must not beat the egg's value.
+func explicit(vars map[string]string, key string) bool {
+	v, ok := vars[key]
+	return ok && (v != "" || !defaulted[key])
+}
 
 // annotate appends, to each error, the source of the variables it names.
 func (s sources) annotate(err error) error {
