@@ -152,17 +152,20 @@ Two deliveries:
      credential there is no CSRF check.
    - **One hour, no sliding.** The session (pzman's own HS256 JWT, signed
      with its session secret) ends one hour after the handoff whatever the
-     activity, so a permission removed in Pelican applies within the hour.
+     activity, so a permission removed in Pelican applies within the hour. An
+     open event stream ends at the expiry of the credential that opened it
+     (the session; for a service token, its own `exp`).
      On a 401 the SPA renews silently: it navigates to
      `<panel>/easy-pz/<uuid_short>/open?to=<percent-encoded path>` (exposed as
      `pelicanOpenUrl` by `GET /api/auth/session`); the panel re-checks the
      permissions and redirects back with `#t=…&to=…`.
    - **Tickets.** EventSource and plain download links cannot send headers:
      `POST /api/auth/ticket` (`{"path": …}`) returns a random single-use
-     ticket valid 30 s, bound to the session's user and scopes and to that
-     exact path, accepted as `?ticket=` only by the event stream and backup
-     downloads. The SPA mints one per EventSource (re)connection and per
-     download. pzman never logs query strings.
+     ticket valid 30 s, bound to the session's user, scopes and expiry and to
+     that exact path, accepted as `?ticket=` only by the event stream and
+     backup downloads; at most 16 live tickets per user (429 beyond). The SPA
+     mints one per EventSource (re)connection and per download. pzman never
+     logs query strings.
 
    A new tab, not an iframe: the plugin's page and pzman are different sites.
 2. **Service calls (plugin pages).** `Authorization: Bearer <token>` on each
@@ -346,6 +349,8 @@ What changed in the plan:
 - [x] Console: every console-ring line (game, `[steamcmd]`, pzman events) also
       to stdout as plain text; pzman's JSON logs to `.easy-pz/logs/` instead of
       stdout. `pzman.log`, rotated to `pzman.log.1` at start above 10 MiB.
+      Pelican also shows stderr: libraries' stderr output (and the standard
+      `log` package) goes to `pzman.log` too (Phase 2 follow-up).
 - [x] stdin: `quit` (the egg's stop command) runs pzman's shutdown (save, quit,
       await JVM) and exits 0; any other line goes to the game's stdin, which
       PZ reads (`System.in`); its reply reaches the console through the
