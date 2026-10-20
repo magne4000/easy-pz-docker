@@ -30,6 +30,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
+        /** End the session (Pelican mode: the SPA forgets its token) */
         post: operations["logout"];
         delete?: never;
         options?: never;
@@ -48,7 +49,7 @@ export interface paths {
         put?: never;
         /**
          * Trade a Pelican handoff token for a session (Pelican mode only)
-         * @description The plugin's *Open easy-pz* redirects to `/auth/pelican#t=<token>`; the page posts the token here. Each token works once.
+         * @description The plugin's *Open easy-pz* redirects to `/auth/pelican#t=<token>`; the page posts the token here. Each token works once. The answer's `token` is the session (one hour, no cookie): send it as `Authorization: Bearer`.
          */
         post: operations["login-pelican"];
         delete?: never;
@@ -64,10 +65,30 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Current session; also issues the CSRF cookie */
+        /** Current session; also issues the CSRF cookie (Docker mode) */
         get: operations["get-session"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * A single-use, 30 s ticket for the event stream or a backup download
+         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user and scopes.
+         */
+        post: operations["create-ticket"];
         delete?: never;
         options?: never;
         head?: never;
@@ -117,7 +138,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download the archive (tar+zstd) */
+        /** Download the archive (tar+zstd); accepts ?ticket= for plain download links */
         get: operations["download-backup"];
         put?: never;
         post?: never;
@@ -255,7 +276,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Live event stream (invalidation signals) */
+        /** Live event stream (invalidation signals); accepts ?ticket= (EventSource cannot send headers) */
         get: operations["stream-events"];
         put?: never;
         post?: never;
@@ -1488,10 +1509,14 @@ export interface components {
              * @enum {string}
              */
             host: "docker" | "pelican";
+            /** @description pelican: the panel's Open easy-pz route for this server; add ?to=<percent-encoded path> to sign in again and come back there */
+            pelicanOpenUrl?: string;
             /** @description pelican: the panel's URL (PZMAN_PELICAN_PANEL_URL) */
             pelicanPanelUrl?: string;
             /** @description what the session may do (permissions contract); every scope for a password session */
             scopes: ("read" | "control" | "console" | "mods" | "config" | "backups" | "schedules" | "settings")[];
+            /** @description pelican, sign-in only: the session token, sent as Authorization: Bearer (no cookies on Pelican); it ends at expiresAt and never slides */
+            token?: string;
             /** @description PANEL_ADMIN_USER, or the Pelican username */
             username?: string;
         };
@@ -1635,6 +1660,28 @@ export interface components {
              */
             readonly $schema?: string;
             items: components["schemas"]["Task"][] | null;
+        };
+        TicketInputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/TicketInputBody.json
+             */
+            readonly $schema?: string;
+            /** @description the request path the ticket is for */
+            path: string;
+        };
+        TicketOutputBody: {
+            /**
+             * Format: uri
+             * @description A URL to the JSON Schema for this object.
+             * @example /api/schemas/TicketOutputBody.json
+             */
+            readonly $schema?: string;
+            /** Format: date-time */
+            expiresAt: string;
+            /** @description pass as ?ticket= on that path, once */
+            ticket: string;
         };
         ToggleModInputBody: {
             /**
@@ -1894,6 +1941,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SessionOutputBody"];
+                };
+            };
+            /** @description Error */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+        };
+    };
+    "create-ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TicketInputBody"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TicketOutputBody"];
                 };
             };
             /** @description Error */

@@ -74,9 +74,13 @@ func newTestServerLog(t *testing.T, cfg app.Config, log *slog.Logger) (*Server, 
 	ring.Append("hello")
 	ms := mods.NewService(mods.Options{InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName,
 		DB: db, CMD: contentCMD{install: cfg.InstallDir}, Bus: bus, Log: log})
-	coord := sched.NewCoordinator(sched.Options{Cfg: cfg, Sup: stoppedSup{}, Settings: st, Bus: bus, Log: log})
-	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms, Coord: coord,
-		Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
+	bs := backup.NewService(backup.ServiceOptions{DB: db, Bus: bus, Log: log, Set: backup.DefaultSet(cfg.DataDir, cfg.ServerName),
+		Dir: filepath.Join(t.TempDir(), "backups"), ServerName: cfg.ServerName})
+	coord := sched.NewCoordinator(sched.Options{Cfg: cfg, Sup: stoppedSup{}, Settings: st, Bus: bus, Backups: bs, Log: log})
+	sc, err := sched.NewScheduler(coord, db, st, bus, time.UTC, nil, log)
+	require.NoError(t, err)
+	s, err := New(cfg, log, Deps{Cfg: cfg, Bus: bus, Ring: ring, Store: db, Settings: st, Mods: ms, Coord: coord, Backups: bs,
+		Sched: sc, Packer: mods.NewPacker(filepath.Join(t.TempDir(), "packs"), log)})
 	require.NoError(t, err)
 	return s, db
 }

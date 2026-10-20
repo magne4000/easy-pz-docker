@@ -237,7 +237,8 @@ func registerConsole(api huma.API, d Deps) {
 func registerEvents(api huma.API, d Deps) {
 	sse.Register(api, huma.Operation{
 		OperationID: "stream-events", Method: http.MethodGet, Path: "/events", Tags: []string{"events"},
-		Summary: "Live event stream (invalidation signals)",
+		Summary:  "Live event stream (invalidation signals); accepts ?ticket= (EventSource cannot send headers)",
+		Metadata: map[string]any{ticketMeta: true},
 	}, events.EventTypeMap(), func(ctx context.Context, _ *struct{}, send sse.Sender) {
 		ch, cancel := d.Bus.Subscribe()
 		defer cancel()

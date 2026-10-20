@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"context"
+	"fmt"
 	"net/http"
 	"slices"
 
@@ -77,3 +79,29 @@ type principal struct {
 }
 
 func (p principal) has(scope string) bool { return slices.Contains(p.Scopes, scope) }
+
+type ctxKey struct{}
+
+// principalFrom is the authenticated caller of a Huma handler (zero, with no
+// scope, outside one).
+func principalFrom(ctx context.Context) principal {
+	p, _ := ctx.Value(ctxKey{}).(principal)
+	return p
+}
+
+// actionScopes: a schedule's action needs its own scope on top of
+// schedules, so managing schedules cannot run what the caller may not.
+var actionScopes = map[string]string{
+	"restart": scopeControl, "stop": scopeControl, "start": scopeControl, "save": scopeControl,
+	"broadcast": scopeControl, "backup": scopeBackups,
+}
+
+// requireAction refuses a schedule action whose scope the caller lacks.
+func requireAction(ctx context.Context, action string) error {
+	need, ok := actionScopes[action]
+	if !ok || principalFrom(ctx).has(need) {
+		return nil // unknown actions are refused by the scheduler's validation
+	}
+	return huma.Error403Forbidden(fmt.Sprintf("permission denied: a %s schedule also needs the %q scope (easy-pz.%s in Pelican)",
+		action, need, need))
+}

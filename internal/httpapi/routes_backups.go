@@ -165,8 +165,9 @@ func registerBackups(api huma.API, d Deps) {
 			}
 			return accepted("restore started"), nil
 		})
-	download := op("download-backup", http.MethodGet, "/backups/{id}/download", "backups", "Download the archive (tar+zstd)", 404, 410)
-	download.Metadata = map[string]any{scopeMeta: scopeBackups} // the whole world: not just read
+	download := op("download-backup", http.MethodGet, "/backups/{id}/download", "backups",
+		"Download the archive (tar+zstd); accepts ?ticket= for plain download links", 404, 410)
+	download.Metadata = map[string]any{scopeMeta: scopeBackups, ticketMeta: true} // the whole world: not just read
 	huma.Register(api, download,
 		func(ctx context.Context, in *BackupIDInput) (*huma.StreamResponse, error) {
 			b, err := d.Backups.Get(ctx, in.ID)
