@@ -2,19 +2,64 @@ package boot
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/magne4000/easy-pz-docker/internal/app"
 	"github.com/magne4000/easy-pz-docker/internal/pz"
+	"github.com/magne4000/easy-pz-docker/internal/sched"
 )
 
 // stopCommand is what Pelican's Stop writes on stdin (the stock egg's stop command).
 const stopCommand = "quit"
+
+// Pelican's console: pzman's stdin and stdout. Variables so tests can swap them.
+var (
+	consoleIn  io.Reader = os.Stdin
+	consoleOut io.Writer = os.Stdout
+)
+
+// onCoordinator, set by tests only, receives Run's coordinator once wired.
+var onCoordinator func(*sched.Coordinator)
+
+// busyRetry is how often startAtBoot retries while another operation runs.
+var busyRetry = time.Second
+
+// startAtBoot is the boot sequence's game start. In Pelican mode a failure
+// exits pzman, so a game someone already started during the boot (UI,
+// schedule) counts as started, and an operation in progress (a restart, a
+// backup) is waited out; only a start that fails leaves no game behind.
+func startAtBoot(ctx context.Context, cfg app.Config, c interface{ Start(context.Context) error }, log *slog.Logger) error {
+	for {
+		err := c.Start(ctx)
+		if !cfg.Pelican() {
+			return err
+		}
+		var busy *sched.BusyError
+		switch {
+		case errors.Is(err, pz.ErrAlreadyRunning):
+			log.Info("game server already started during boot")
+			return nil
+		case errors.As(err, &busy):
+			log.Info("waiting for an operation to finish before starting the game server", "op", busy.Op)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(busyRetry):
+			}
+		default:
+			return err
+		}
+	}
+}
 
 // consoleInput reads Pelican's console (pzman's stdin) line by line until EOF:
 // "quit" calls quit (pzman's graceful shutdown), any other line goes to the

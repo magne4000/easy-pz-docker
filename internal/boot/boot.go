@@ -85,7 +85,7 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	bus := events.NewBus(log, 256)
 	ring := console.NewRing(cfg.ConsoleRing)
 	if cfg.Pelican() {
-		ring.Mirror(os.Stdout) // Pelican's console shows the container's stdout
+		ring.Mirror(consoleOut) // Pelican's console shows the container's stdout
 	}
 	tk := tasks.NewRegistry(bus)
 	st, err := settings.Open(ctx, cfg, db, bus)
@@ -171,6 +171,9 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	}
 	coord = sched.NewCoordinator(sched.Options{Cfg: cfg, Sup: dr.sup, RCON: dr.rcon, CMD: dr.cmd, Mods: modSvc, Backups: bak,
 		Settings: st, Bus: bus, Tasks: tk, Log: log.With("component", "coordinator"), SaveWait: saveWait})
+	if onCoordinator != nil {
+		onCoordinator(coord)
+	}
 	scheduler, err := sched.NewScheduler(coord, db, st, bus, cfg.Location(), nil, log.With("component", "scheduler"))
 	if err != nil {
 		return err
@@ -210,7 +213,7 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	if cfg.Pelican() {
 		consoleLine(fmt.Sprintf("[pzman] easy-pz %s on Pelican: UI on port %d, logs in %s", version, cfg.Port,
 			filepath.Join(cfg.LogDir, app.LogFileName)))
-		go consoleInput(os.Stdin, dr.sup, consoleLine, quit)
+		go consoleInput(consoleIn, dr.sup, consoleLine, quit)
 	}
 
 	bootFailed := make(chan error, 1)
@@ -349,7 +352,7 @@ func bootSequence(ctx context.Context, b bootEnv) error {
 	} else if len(ids) > 0 {
 		b.log.Info("workshop items downloaded", "count", len(ids))
 	}
-	if err := b.coord.Start(ctx); err != nil {
+	if err := startAtBoot(ctx, b.cfg, b.coord, b.log); err != nil {
 		return err
 	}
 	if b.fake && b.dr.sc != nil && b.dr.sc.TriggerBackup {
