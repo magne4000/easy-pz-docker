@@ -16,6 +16,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Components\Component;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Carbon;
 use Magne4000\EasyPz\Models\EasyPzServer;
@@ -171,6 +172,9 @@ class EasyPzPage extends Page
                 ->description(trans('easy-pz::strings.page.no_memory_limit_help'))
                 ->warning();
         }
+        if (self::sharesPanelHost($server->node->fqdn, null)) {
+            $components[] = $this->sharedHostCallout();
+        }
 
         return $components;
     }
@@ -191,6 +195,16 @@ class EasyPzPage extends Page
             $components[] = Callout::make(trans('easy-pz::strings.page.upgrade_available', ['version' => $pinned]))
                 ->description(trans('easy-pz::strings.page.upgrade_available_help', ['deployed' => $ez->deployed_version ?? '?']))
                 ->info();
+        }
+
+        if (self::isRootAdmin()) {
+            try {
+                if (EasyPzService::sharesPanelHost(EasyPzService::uiUrl($this->server(), $ez))) {
+                    $components[] = $this->sharedHostCallout();
+                }
+            } catch (\RuntimeException) {
+                // no UI allocation: shown by the status call's error
+            }
         }
 
         $running = $this->system['version'] ?? null;
@@ -459,6 +473,7 @@ class EasyPzPage extends Page
                 ->label(trans('easy-pz::strings.enable.override'))
                 ->helperText(trans('easy-pz::strings.enable.override_help'))
                 ->default($ez?->ui_url_override)
+                ->live(onBlur: true)
                 ->rule(fn () => function (string $attribute, mixed $value, \Closure $fail) {
                     try {
                         Urls::validated((string) $value);
@@ -466,7 +481,26 @@ class EasyPzPage extends Page
                         $fail($exception->getMessage());
                     }
                 }),
+            $this->sharedHostCallout()
+                ->visible(fn (Get $get) => self::sharesPanelHost($this->server()->node->fqdn, $get('ui_url_override'))),
         ];
+    }
+
+    /** Whether pzman's UI, at the node's address or the override, is on the panel's host. */
+    private static function sharesPanelHost(string $nodeFqdn, mixed $override): bool
+    {
+        try {
+            return EasyPzService::sharesPanelHost(Urls::pzmanUi($nodeFqdn, 1, is_string($override) ? $override : null));
+        } catch (\InvalidArgumentException) {
+            return false;
+        }
+    }
+
+    private function sharedHostCallout(): Callout
+    {
+        return Callout::make(trans('easy-pz::strings.page.shared_host'))
+            ->description(trans('easy-pz::strings.page.shared_host_help'))
+            ->danger();
     }
 
     private function enableAction(): Action

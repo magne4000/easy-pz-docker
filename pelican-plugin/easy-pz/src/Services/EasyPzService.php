@@ -120,6 +120,15 @@ class EasyPzService
         return UiAllocations::defaultId($ports, self::variables($server)['STEAM_PORT'] ?? null);
     }
 
+    /**
+     * Whether the browser would send the panel's cookies to pzman: the panel
+     * and pzman's UI on one host (ports do not separate cookies).
+     */
+    public static function sharesPanelHost(string $uiUrl): bool
+    {
+        return Urls::sameHost((string) config('app.url'), $uiUrl);
+    }
+
     public static function envFile(Server $server, EasyPzServer $ez): string
     {
         $panelUrl = (string) config('app.url');

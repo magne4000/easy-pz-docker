@@ -67,6 +67,28 @@ final class Urls
         return rtrim($url, '/');
     }
 
+    /**
+     * Whether two URLs name the same host, case-insensitively, ports ignored.
+     * Cookies are scoped by host, not port: when the panel and pzman's UI share
+     * one, the browser sends the panel's session cookies to pzman.
+     */
+    public static function sameHost(string $a, string $b): bool
+    {
+        $hostA = self::hostOf($a);
+
+        return $hostA !== null && $hostA === self::hostOf($b);
+    }
+
+    private static function hostOf(string $url): ?string
+    {
+        $host = parse_url(trim($url), PHP_URL_HOST);
+        if (!is_string($host) || $host === '') {
+            return null;
+        }
+
+        return rtrim(strtolower(trim($host, '[]')), '.');
+    }
+
     private static function host(string $fqdn): string
     {
         $fqdn = trim($fqdn);

@@ -15,6 +15,8 @@ return [
         'pzman_error' => 'easy-pz answered with an error',
         'upgrade_available' => 'pzman :version is available',
         'upgrade_available_help' => 'This server runs the deployed :deployed. Upgrade under Admin.',
+        'shared_host' => 'The panel and easy-pz share a hostname',
+        'shared_host_help' => 'Browsers send cookies by hostname, not by port: opening easy-pz sends this panel\'s session cookies to pzman\'s port. Whoever controls this server\'s files (its owner can replace .easy-pz/pzman) could then capture the panel session of an admin who opens easy-pz. Give the node a different hostname than the panel (e.g. the panel on a name and the node on its IP address), or set the UI URL override to another hostname.',
         'restart_to_apply' => 'pzman :running is running, :deployed is deployed: restart the server to apply it.',
     ],
 

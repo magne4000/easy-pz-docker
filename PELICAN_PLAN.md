@@ -458,6 +458,7 @@ from a URL with a path prefix.
     `AuthenticateSession` (ends with a password change) and
     `RequireTwoFactorAuthentication`.
   - The handoff takes an optional `?to=<same-origin absolute path>` (≤ 512 chars, no `//`, `\` or control characters; anything else is ignored) and passes it on as `#t=<token>&to=<rawurlencoded path>`, for pzman's session renewal.
+  - Root admins see a warning (Enable form, UI address form, page) when the panel URL and pzman's UI URL share a host (ports ignored): the browser would send the panel's session cookies to a pzman binary the server owner can replace; the fix is a different hostname for the node or the UI URL override.
   - The UI allocation picker defaults to the first allocation that is neither the primary one nor the one of the egg's `STEAM_PORT`.
   - A UI allocation no longer assigned to the server (an owner can detach
     it) counts as missing: no service call, handoff or proxied request goes
