@@ -1,0 +1,67 @@
+name: pelican-e2e
+
+# easy-pz on Pelican with the real game (pelican/e2e.sh): the Pelican stack,
+# the plugin, a stock Project Zomboid server, Enable, mods through the panel,
+# an update window, Stop and Disable. Runs on demand, and on pull requests
+# carrying the label pelican-e2e.
+on:
+  workflow_dispatch:
+    inputs:
+      stages:
+        description: pelican/e2e.sh stages
+        default: setup plugin pz easypz
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pelican-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  e2e:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.action == 'labeled' && github.event.label.name == 'pelican-e2e') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'pelican-e2e'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      OUT: ${{ github.workspace }}/e2e-out
+      STAGES: ${{ inputs.stages || 'setup plugin pz easypz' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: oven-sh/setup-bun@v2
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+      - name: Build pzman
+        run: |
+          (cd web && bun install --frozen-lockfile && bun run build)
+          mkdir -p "$OUT/dist"
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-X main.version=e2e' -o "$OUT/dist/pzman-linux-amd64" ./cmd/pzman
+          (cd "$OUT/dist" && sha256sum pzman-linux-amd64 >pzman-SHA256SUMS)
+      - name: End-to-end
+        run: pelican/e2e.sh
+      - name: Results
+        if: always()
+        run: |
+          cat "$OUT/results.md" >>"$GITHUB_STEP_SUMMARY"
+          cat "$OUT/results.md"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pelican-e2e
+          path: |
+            e2e-out
+            !e2e-out/dist
