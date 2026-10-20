@@ -139,16 +139,36 @@ Ed25519 signature of that input, all base64url without padding. Any other
 Two deliveries:
 
 1. **Handoff (browser SSO).** The plugin route mints a token and redirects to
-   `<pzman UI URL>/auth/pelican#t=<token>`. The fragment never reaches logs;
-   the SPA posts it as `{"token": "…"}` to `POST /api/auth/pelican` (public,
-   CSRF as for the login), pzman checks signature, `iss`, `aud`, `exp` and
-   `jti`, and creates its normal session carrying the scopes and the username.
-   A new tab, not an iframe: pzman's session cookie is `SameSite=Strict` and a
-   cross-site iframe would depend on third-party cookies.
+   `<pzman UI URL>/auth/pelican#t=<token>[&to=<percent-encoded path>]`. The
+   fragment never reaches logs; the SPA posts the token as `{"token": "…"}` to
+   `POST /api/auth/pelican` (public), pzman checks signature, `iss`, `aud`,
+   `exp` and `jti`, and answers a session token in the body (`token`). The SPA
+   keeps it in `localStorage` and sends `Authorization: Bearer <session
+   token>` on every API call, then goes to `to` (only a path on its own
+   origin: starts with `/`, not `//`, no backslash) or `/`.
+   - **No cookies in Pelican mode.** Cookies are shared by every port of the
+     node's host, so another tenant's web server on that host would receive
+     them; `localStorage` is per origin, hence per port. With no ambient
+     credential there is no CSRF check.
+   - **One hour, no sliding.** The session (pzman's own HS256 JWT, signed
+     with its session secret) ends one hour after the handoff whatever the
+     activity, so a permission removed in Pelican applies within the hour.
+     On a 401 the SPA renews silently: it navigates to
+     `<panel>/easy-pz/<uuid_short>/open?to=<percent-encoded path>` (exposed as
+     `pelicanOpenUrl` by `GET /api/auth/session`); the panel re-checks the
+     permissions and redirects back with `#t=…&to=…`.
+   - **Tickets.** EventSource and plain download links cannot send headers:
+     `POST /api/auth/ticket` (`{"path": …}`) returns a random single-use
+     ticket valid 30 s, bound to the session's user and scopes and to that
+     exact path, accepted as `?ticket=` only by the event stream and backup
+     downloads. The SPA mints one per EventSource (re)connection and per
+     download. pzman never logs query strings.
+
+   A new tab, not an iframe: the plugin's page and pzman are different sites.
 2. **Service calls (plugin pages).** `Authorization: Bearer <token>` on each
    request from the panel to `/api/*`, minted per request for the acting
-   Pelican user, so pzman enforces the same scopes. Bearer requests carry no
-   cookies and skip the CSRF check.
+   Pelican user, so pzman enforces the same scopes. Each such token is
+   single-use; pzman tells them from session tokens by their `alg`.
 
 The pzman UI URL is `http://<node FQDN>:<UI allocation port>` unless the
 server page stores an override (a reverse proxy in front of pzman). The panel
@@ -175,7 +195,12 @@ owner and root admins get every scope; subusers get what is ticked.
 | `easy-pz.settings` | `settings` | `system` writes (settings) |
 
 A password session (Docker mode) has every scope. pzman's UI hides what the
-session's scopes do not allow; the API refuses it with 403.
+session's scopes do not allow; the API refuses it with 403. Least privilege on
+top of the table: `GET /api/config/ini` withholds `RCONPassword` (empty,
+`redacted`) without `config`, since RCON runs any console command; creating,
+updating or running a schedule also needs the scope of its action (`restart`,
+`stop`, `save`, `broadcast`: `control`; `backup`: `backups`), so `schedules`
+alone cannot restart the server or take backups.
 
 ### Contract: public mod page through the panel
 
@@ -360,9 +385,12 @@ window restarts PZ while Pelican keeps showing the server running.
 - [x] `POST /api/auth/pelican` (handoff → session with scopes, username from
       `name`); SPA route `/auth/pelican` reads the fragment and posts it.
       A token without `read` gets 403. `GET /api/auth/session` has `username`
-      (was `user`), `scopes`, `host` and, on Pelican, `pelicanPanelUrl`.
+      (was `user`), `scopes`, `host` and, on Pelican, `pelicanPanelUrl` and
+      `pelicanOpenUrl` (renewal).
 - [x] Bearer authentication for service calls; CSRF check skipped for Bearer.
-      Skipped only when the request has no session cookie; Pelican mode only.
+      Pelican mode sets no cookie and has no CSRF check at all: the SPA's
+      session is a bearer too (token contract above), with tickets for the
+      event stream and downloads.
 - [x] Scopes in the session; per-operation enforcement from Huma tags + method
       (table above); 403 with a clear message; SPA hides what is not allowed.
       `GET /backups/{id}/download` needs `backups` (operation metadata); a
