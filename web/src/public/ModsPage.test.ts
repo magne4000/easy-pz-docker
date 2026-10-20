@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { posixCommand, powershellCommand } from "./ModsPage";
+import { describe, expect, it, vi } from "vitest";
+import { copyText, posixCommand, powershellCommand } from "./ModsPage";
 
 const d = { modsLine: "ModA;Mod B;Brita_2", mapLine: "RavenCreek;Muldraugh, KY", iniName: "Guyverotte.ini" };
 
@@ -25,5 +25,32 @@ describe("config one-liners", () => {
 
   it("escapes $ so PowerShell -replace does not treat it as a group", () => {
     expect(powershellCommand({ ...d, modsLine: "A$1" })).toContain("Mods=A$$1");
+  });
+});
+
+describe("copyText", () => {
+  it("uses the Clipboard API when it works", async () => {
+    const writes: string[] = [];
+    vi.stubGlobal("navigator", { clipboard: { writeText: async (s: string) => void writes.push(s) } });
+    expect(await copyText("abc", null)).toBe("copied");
+    expect(writes).toEqual(["abc"]);
+    vi.unstubAllGlobals();
+  });
+
+  it("selects the text when the page may not copy (sandboxed, opaque origin)", async () => {
+    const el = document.createElement("pre");
+    el.textContent = "Mods=A;B";
+    document.body.append(el);
+    vi.stubGlobal("navigator", {});
+    expect(await copyText("Mods=A;B", el)).toBe("selected");
+    expect(window.getSelection()?.toString()).toBe("Mods=A;B");
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText: () => Promise.reject(new DOMException("denied", "NotAllowedError")) },
+    });
+    window.getSelection()?.removeAllRanges();
+    expect(await copyText("Mods=A;B", el)).toBe("selected");
+    expect(window.getSelection()?.toString()).toBe("Mods=A;B");
+    vi.unstubAllGlobals();
+    el.remove();
   });
 });
