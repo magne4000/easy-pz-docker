@@ -39,8 +39,11 @@ type drivers struct {
 	sc   *devfake.Scenario
 }
 
-// Run boots pzman and blocks until ctx is cancelled (SIGTERM) and shutdown completes.
+// Run boots pzman and blocks until ctx is cancelled (SIGTERM; in Pelican mode
+// also "quit" on stdin) and shutdown completes.
 func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) error {
+	ctx, quit := context.WithCancel(ctx)
+	defer quit()
 	fake := cfg.Drivers == app.DriversFake
 	var scenario devfake.Scenario
 	if fake {
@@ -60,6 +63,11 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 			return fmt.Errorf("create %s: %w", cfg.SteamHome, err)
 		}
 	}
+	if cfg.Pelican() {
+		if err := writePelicanIgnore(cfg.Root); err != nil {
+			log.Warn("could not update .pelicanignore", "err", err)
+		}
+	}
 	_, statErr := os.Stat(cfg.DBPath)
 	freshDB := errors.Is(statErr, fs.ErrNotExist)
 	if fake {
@@ -76,6 +84,9 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 
 	bus := events.NewBus(log, 256)
 	ring := console.NewRing(cfg.ConsoleRing)
+	if cfg.Pelican() {
+		ring.Mirror(consoleOut) // Pelican's console shows the container's stdout
+	}
 	tk := tasks.NewRegistry(bus)
 	st, err := settings.Open(ctx, cfg, db, bus)
 	if err != nil {
@@ -91,8 +102,17 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 		},
 		OnLine: consoleLine,
 	}
+	// In Pelican mode pzman already runs as Wings' user, which owns every file.
+	uid, gid := cfg.PUID, cfg.PGID
+	if cfg.Pelican() {
+		uid, gid = -1, -1
+	}
+	var steamEnv []string
+	if cfg.SteamPlatform != "" {
+		steamEnv = []string{"STEAM_PLATFORM=" + cfg.SteamPlatform}
+	}
 	popts := pz.ProcessOptions{
-		InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName, UID: cfg.PUID, GID: cfg.PGID,
+		InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: cfg.ServerName, UID: uid, GID: gid,
 		StopTimeout: cfg.StopTimeout, AutoRestart: true, Hooks: hooks, Log: log.With("component", "supervisor"),
 		PreStart: func(ctx context.Context) ([]string, error) { return coord.PreStart(ctx) },
 	}
@@ -112,7 +132,7 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 		proc := pz.NewProcess(popts)
 		dr = drivers{sup: proc, rcon: mgr, web: steam.NewWebAPI(nil, "")}
 		dr.cmd = steam.NewSteamCMD(steam.Options{
-			Bin: cfg.SteamCMD, InstallDir: cfg.InstallDir, Home: cfg.SteamHome, UID: cfg.PUID, GID: cfg.PGID,
+			Bin: cfg.SteamCMD, InstallDir: cfg.InstallDir, Home: cfg.SteamHome, UID: uid, GID: gid, Env: steamEnv,
 			Log:    log.With("component", "steamcmd"),
 			OnLine: func(l string) { consoleLine("[steamcmd] " + l) },
 			Guard: func() error { // app_update only (see steam.Options.Guard)
@@ -151,6 +171,9 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	}
 	coord = sched.NewCoordinator(sched.Options{Cfg: cfg, Sup: dr.sup, RCON: dr.rcon, CMD: dr.cmd, Mods: modSvc, Backups: bak,
 		Settings: st, Bus: bus, Tasks: tk, Log: log.With("component", "coordinator"), SaveWait: saveWait})
+	if onCoordinator != nil {
+		onCoordinator(coord)
+	}
 	scheduler, err := sched.NewScheduler(coord, db, st, bus, cfg.Location(), nil, log.With("component", "scheduler"))
 	if err != nil {
 		return err
@@ -187,20 +210,39 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 		return err
 	}
 
+	if cfg.Pelican() {
+		consoleLine(fmt.Sprintf("[pzman] easy-pz %s on Pelican: UI on port %d, logs in %s", version, cfg.Port,
+			filepath.Join(cfg.LogDir, app.LogFileName)))
+		go consoleInput(consoleIn, dr.sup, consoleLine, quit)
+	}
+
+	bootFailed := make(chan error, 1)
 	go func() {
 		defer close(booted)
 		env := bootEnv{cfg: cfg, log: log, coord: coord, mods: modSvc, dr: dr, tasks: tk, fake: fake, freshDB: freshDB}
-		if err := bootSequence(ctx, env); err != nil {
+		err := bootSequence(ctx, env)
+		switch {
+		case err == nil, ctx.Err() != nil:
+		case cfg.Pelican():
+			// A container without a game is no use to Pelican: exit so its
+			// crash handling restarts (or reports) the server.
+			log.Error("boot sequence failed", "err", err)
+			consoleLine("[pzman] boot failed: " + err.Error())
+			bootFailed <- err
+		default:
 			log.Error("boot sequence failed; the panel stays up so you can fix it", "err", err)
 			consoleLine("[pzman] boot failed: " + err.Error())
 		}
 	}()
 
+	var runErr error
 	select {
 	case <-ctx.Done():
 		log.Info("shutdown requested")
 	case <-gctx.Done():
 		log.Error("a core component stopped unexpectedly")
+	case err := <-bootFailed:
+		runErr = fmt.Errorf("boot failed: %w", err)
 	}
 	shutdown(log, cfg, dr.sup, scheduler, srv)
 	stopAll()
@@ -208,8 +250,11 @@ func Run(ctx context.Context, cfg app.Config, log *slog.Logger, version string) 
 	if errors.Is(err, context.Canceled) {
 		err = nil
 	}
+	if cfg.Pelican() {
+		consoleLine("[pzman] stopped")
+	}
 	log.Info("bye")
-	return err
+	return errors.Join(runErr, err)
 }
 
 func modRefs(ctx context.Context, m *mods.Service) []backup.ModRef {
@@ -247,10 +292,12 @@ type bootEnv struct {
 	freshDB bool // the database was created by this start
 }
 
-// bootSequence: ownership fix → install/update game → fetch missing mods →
-// start (PreStart applies launch JSON, ini seeds, mod links and the self-check).
+// bootSequence: ownership fix (Docker mode) → install/update game → fetch
+// missing mods → start (PreStart applies launch JSON, ini seeds, mod links
+// and the self-check).
 func bootSequence(ctx context.Context, b bootEnv) error {
-	if !b.fake && !b.cfg.IsDev() {
+	// Pelican: pzman is not root and Wings' user already owns /home/container.
+	if !b.fake && !b.cfg.IsDev() && !b.cfg.Pelican() {
 		// SteamCMD updates itself in place, so its own directory must belong to PUID too.
 		for _, root := range []string{b.cfg.InstallDir, b.cfg.DataDir, b.cfg.BackupDir, b.cfg.SteamHome, b.cfg.CacheDir, filepath.Dir(b.cfg.SteamCMD)} {
 			res, err := sys.FixOwnership(ctx, root, b.cfg.PUID, b.cfg.PGID)
@@ -305,7 +352,7 @@ func bootSequence(ctx context.Context, b bootEnv) error {
 	} else if len(ids) > 0 {
 		b.log.Info("workshop items downloaded", "count", len(ids))
 	}
-	if err := b.coord.Start(ctx); err != nil {
+	if err := startAtBoot(ctx, b.cfg, b.coord, b.log); err != nil {
 		return err
 	}
 	if b.fake && b.dr.sc != nil && b.dr.sc.TriggerBackup {

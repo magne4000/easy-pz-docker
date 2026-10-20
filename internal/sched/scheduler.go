@@ -94,6 +94,10 @@ func (s *Scheduler) Start(ctx context.Context) error {
 		return err
 	}
 	for _, sc := range list {
+		if s.stopUnavailable(sc.Action) {
+			s.log.Warn("schedule skipped: the stop action is not available on Pelican", "id", sc.ID, "name", sc.Name)
+			continue
+		}
 		if err := s.register(sc); err != nil {
 			s.log.Error("schedule could not be registered", "id", sc.ID, "err", err)
 		}
@@ -121,6 +125,23 @@ func (s *Scheduler) Start(ctx context.Context) error {
 }
 
 func (s *Scheduler) Shutdown() error { return s.s.Shutdown() }
+
+// stopUnavailable: Pelican mode has no stop action (see ErrStopUnavailable).
+func (s *Scheduler) stopUnavailable(action string) bool {
+	return action == "stop" && s.c.o.Cfg.Pelican()
+}
+
+// validate checks in and refuses the stop action in Pelican mode.
+func (s *Scheduler) validate(in *ScheduleInput) error {
+	if err := in.validate(); err != nil {
+		return err
+	}
+	if s.stopUnavailable(in.Action) {
+		return fmt.Errorf("%w: the stop action is not available on Pelican (the container would keep running "+
+			"without the game); use restart, or Pelican's own schedules to stop the server", ErrInvalidSchedule)
+	}
+	return nil
+}
 
 func (s *Scheduler) syncInternal() {
 	cur := s.settings.Get()
@@ -285,7 +306,7 @@ func toStore(in ScheduleInput) store.Schedule {
 }
 
 func (s *Scheduler) Create(ctx context.Context, in ScheduleInput) (Schedule, error) {
-	if err := in.validate(); err != nil {
+	if err := s.validate(&in); err != nil {
 		return Schedule{}, err
 	}
 	sc := toStore(in)
@@ -302,7 +323,7 @@ func (s *Scheduler) Create(ctx context.Context, in ScheduleInput) (Schedule, err
 }
 
 func (s *Scheduler) Update(ctx context.Context, id int64, in ScheduleInput) (Schedule, error) {
-	if err := in.validate(); err != nil {
+	if err := s.validate(&in); err != nil {
 		return Schedule{}, err
 	}
 	sc := toStore(in)

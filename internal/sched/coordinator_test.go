@@ -118,15 +118,27 @@ type env struct {
 	rcon  *stubRCON
 	cmd   *stubCMD
 	clock *clockwork.FakeClock
+	db    *store.DB
+	st    *settings.Store
+	bus   *events.Bus
 }
 
 func setup(t *testing.T) *env {
+	t.Helper()
+	return setupCfg(t, nil)
+}
+
+// setupCfg is setup with mut applied to the config first.
+func setupCfg(t *testing.T, mut func(*app.Config)) *env {
 	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	dir := t.TempDir()
 	cfg := app.Config{ServerName: "s", DataDir: filepath.Join(dir, "data"), InstallDir: filepath.Join(dir, "install"),
 		UpdateMaxDelay: time.Hour, BackupKeep: 5}
+	if mut != nil {
+		mut(&cfg)
+	}
 	db, err := store.Open(ctx, log, filepath.Join(dir, "t.db"))
 	require.NoError(t, err)
 	t.Cleanup(func() { db.Close() })
@@ -138,7 +150,8 @@ func setup(t *testing.T) *env {
 	s.WarnMinutes, s.UpdateMaxDelayMinutes, s.AutoUpdate = []int{5, 1}, 10, false
 	_, err = st.Update(ctx, s)
 	require.NoError(t, err)
-	e := &env{sup: &stubSup{state: pz.StateRunning}, rcon: &stubRCON{}, cmd: &stubCMD{}, clock: clockwork.NewFakeClock()}
+	e := &env{sup: &stubSup{state: pz.StateRunning}, rcon: &stubRCON{}, cmd: &stubCMD{}, clock: clockwork.NewFakeClock(),
+		db: db, st: st, bus: bus}
 	ms := mods.NewService(mods.Options{InstallDir: cfg.InstallDir, DataDir: cfg.DataDir, ServerName: "s", DB: db, CMD: e.cmd,
 		WebAPI: stubWeb{}, Bus: bus, Tasks: tk, Log: log})
 	bs := backup.NewService(backup.ServiceOptions{DB: db, Bus: bus, Tasks: tk, Log: log, Set: backup.DefaultSet(cfg.DataDir, "s"),

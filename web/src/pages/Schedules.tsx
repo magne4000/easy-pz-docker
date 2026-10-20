@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, type Schemas, unwrap } from "@/api/client";
 import { keys } from "@/api/keys";
-import { useAction, useSchedules } from "@/api/queries";
+import { useAction, useSchedules, useSystem } from "@/api/queries";
 import { Confirm } from "@/components/Confirm";
 import { Empty } from "@/components/Empty";
 import { PageHeader } from "@/components/PageHeader";
@@ -47,6 +47,8 @@ const empty: Input_ = {
 
 function Editor({ value, onClose }: { value: (Input_ & { id?: number }) | null; onClose: () => void }) {
   const { t } = useTranslation();
+  // Pelican: a stop would leave the container running without the game.
+  const pelican = useSystem().data?.host === "pelican";
   const [form, setForm] = useState<Input_>(empty);
   const [warn, setWarn] = useState("");
   useEffect(() => {
@@ -84,7 +86,11 @@ function Editor({ value, onClose }: { value: (Input_ & { id?: number }) | null; 
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="restart">{t("Restart (with countdown)")}</SelectItem>
-                <SelectItem value="stop">{t("Stop (with countdown)")}</SelectItem>
+                {(!pelican || form.action === "stop") && (
+                  <SelectItem value="stop" disabled={pelican}>
+                    {t("Stop (with countdown)")}
+                  </SelectItem>
+                )}
                 <SelectItem value="save">{t("Save the world")}</SelectItem>
                 <SelectItem value="broadcast">{t("Broadcast a message")}</SelectItem>
                 <SelectItem value="backup">{t("Backup (if the world changed)")}</SelectItem>
@@ -173,6 +179,7 @@ function Editor({ value, onClose }: { value: (Input_ & { id?: number }) | null; 
 export default function Schedules() {
   const { t } = useTranslation();
   const q = useSchedules();
+  const pelican = useSystem().data?.host === "pelican";
   const [editing, setEditing] = useState<(Input_ & { id?: number }) | null>(null);
   const del = useAction((id: number) => unwrap(api.DELETE("/schedules/{id}", { params: { path: { id } } })), {
     success: t("Schedule deleted"),
@@ -266,10 +273,15 @@ export default function Schedules() {
                     <Badge variant="secondary" className="mt-1">
                       {t(s.action)}
                     </Badge>
+                    {pelican && s.action === "stop" && (
+                      <p className="text-warning mt-1 text-xs">
+                        {t("Not run on Pelican: use Pelican's Stop, or change the action to restart.")}
+                      </p>
+                    )}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{s.cron}</TableCell>
                   <TableCell className="hidden md:table-cell">
-                    {s.enabled ? formatDate(s.nextRunAt) : "—"}
+                    {s.enabled && !(pelican && s.action === "stop") ? formatDate(s.nextRunAt) : "—"}
                   </TableCell>
                   <TableCell className="hidden lg:table-cell">
                     <p>{formatRelative(s.lastRunAt)}</p>

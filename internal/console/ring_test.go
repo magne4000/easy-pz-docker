@@ -2,6 +2,7 @@ package console
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/magne4000/easy-pz-docker/internal/events"
@@ -59,4 +60,16 @@ func TestTailDoesNotAlias(t *testing.T) {
 	}
 	require.Equal(t, "a", got[0].Text)
 	require.Equal(t, "b", got[1].Text)
+}
+
+func TestMirror(t *testing.T) {
+	r := NewRing(2)
+	r.Append("before")
+	var out strings.Builder
+	r.Mirror(&out)
+	for _, l := range []string{"*** SERVER STARTED ***", "[steamcmd] Success!", "[pzman] boot failed: x"} {
+		r.Append(l)
+	}
+	require.Equal(t, "*** SERVER STARTED ***\n[steamcmd] Success!\n[pzman] boot failed: x\n", out.String())
+	require.Equal(t, "[pzman] boot failed: x", r.Tail(1)[0].Text, "the ring still keeps the lines")
 }

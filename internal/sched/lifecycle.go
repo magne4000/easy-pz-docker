@@ -85,9 +85,17 @@ type LifecycleRequest struct {
 	Warn []int
 }
 
+// ErrStopUnavailable: in Pelican mode the container is the game server; a
+// stop that leaves pzman running would show it running with no game.
+var ErrStopUnavailable = errors.New("stopping the game server from easy-pz is disabled on Pelican: " +
+	"use Pelican's Stop, which saves the world and stops the container")
+
 // Stop stops the server after an optional countdown. It returns once the
 // operation is accepted; progress is visible through tasks and status events.
 func (c *Coordinator) Stop(req LifecycleRequest) error {
+	if c.o.Cfg.Pelican() {
+		return ErrStopUnavailable
+	}
 	return c.async("stop", "Stopping server", req, func(ctx context.Context, h *tasks.Handle) error {
 		return c.stopServer(ctx, h)
 	})

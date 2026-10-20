@@ -45,13 +45,24 @@ func main() {
 		fmt.Fprintf(os.Stderr, "pzman: invalid configuration:\n%v\n", err)
 		os.Exit(1)
 	}
-	log := app.NewLogger(cfg)
+	log, logFile, err := app.NewLogger(cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "pzman: %v\n", err)
+		os.Exit(1)
+	}
 	log.Info("pzman starting", "version", version, "config", cfg.Redacted())
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
-	if err := boot.Run(ctx, cfg, log, version); err != nil {
+	err = boot.Run(ctx, cfg, log, version)
+	if err != nil {
 		log.Error("pzman stopped with an error", "err", err)
+		if cfg.Pelican() { // the log file is not the console: say why there too
+			fmt.Fprintf(os.Stderr, "[pzman] stopped with an error: %v\n", err)
+		}
+	}
+	logFile.Close()
+	if err != nil {
 		os.Exit(1)
 	}
 }

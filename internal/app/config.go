@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -28,7 +29,17 @@ const (
 	CookieSecureFalse CookieSecure = "false"
 )
 
+type Host string // "docker" | "pelican"
+
+const (
+	HostDocker  Host = "docker"
+	HostPelican Host = "pelican"
+)
+
 type Config struct {
+	// Host is where pzman runs: the compose image, or the stock Pelican PZ
+	// egg's container (see pelican.go for what changes there).
+	Host           Host          `env:"PZMAN_HOST" envDefault:"docker"`
 	Env            string        `env:"PANEL_ENV" envDefault:"prod"`
 	LogLevel       string        `env:"PANEL_LOG_LEVEL" envDefault:"info"`
 	Port           int           `env:"PANEL_PORT" envDefault:"8080"`
@@ -49,13 +60,17 @@ type Config struct {
 	PublicURL      string        `env:"PANEL_PUBLIC_URL"`
 	// PublicGameAddress: set when players reach the game elsewhere than
 	// PublicURL's host (CDN or HTTP-only proxy, another machine, other port).
-	PublicGameAddress string        `env:"PANEL_PUBLIC_GAME_ADDRESS"`
-	SteamCMD          string        `env:"PANEL_STEAMCMD" envDefault:"/opt/steamcmd/steamcmd.sh"`
-	SteamHome         string        `env:"PANEL_STEAM_HOME" envDefault:"/var/lib/pzman/steam"`
-	CacheDir          string        `env:"PANEL_CACHE_DIR" envDefault:"/var/lib/pzman/cache"`
-	StopTimeout       time.Duration `env:"PANEL_STOP_TIMEOUT" envDefault:"90s"`
-	DiskWarnPct       float64       `env:"PANEL_DISK_WARN_PERCENT" envDefault:"85"`
-	DiskCritPct       float64       `env:"PANEL_DISK_CRIT_PERCENT" envDefault:"95"`
+	PublicGameAddress string `env:"PANEL_PUBLIC_GAME_ADDRESS"`
+	SteamCMD          string `env:"PANEL_STEAMCMD" envDefault:"/opt/steamcmd/steamcmd.sh"`
+	SteamHome         string `env:"PANEL_STEAM_HOME" envDefault:"/var/lib/pzman/steam"`
+	CacheDir          string `env:"PANEL_CACHE_DIR" envDefault:"/var/lib/pzman/cache"`
+	// LogDir receives pzman's JSON log file in Pelican mode (stdout is the
+	// panel console there); unused in Docker mode, which logs to stdout.
+	LogDir        string        `env:"PANEL_LOG_DIR"`
+	SteamPlatform string        `env:"STEAM_PLATFORM"`
+	StopTimeout   time.Duration `env:"PANEL_STOP_TIMEOUT" envDefault:"90s"`
+	DiskWarnPct   float64       `env:"PANEL_DISK_WARN_PERCENT" envDefault:"85"`
+	DiskCritPct   float64       `env:"PANEL_DISK_CRIT_PERCENT" envDefault:"95"`
 
 	// Defaults for settings the UI can override (stored in the DB).
 	BackupInterval      time.Duration `env:"PANEL_BACKUP_INTERVAL" envDefault:"2h"`
@@ -88,12 +103,39 @@ type Config struct {
 	SteamVAC          string `env:"STEAM_VAC"`
 	UpdateOnStart     bool   `env:"UPDATE_ON_START" envDefault:"true"`
 	Timezone          string `env:"TZ" envDefault:"UTC"`
+	// EggAutoUpdate is the Pelican egg's AUTO_UPDATE variable, read only to
+	// warn when the yolk image updates the game behind pzman's back.
+	EggAutoUpdate string `env:"AUTO_UPDATE"`
+
+	// Root is the Pelican server folder (/home/container), the parent of the
+	// executable's directory; empty in Docker mode.
+	Root string
 }
 
-// Load reads the environment and validates, reporting every problem at once.
+// Load reads pzman.env (next to the executable) and the environment, applies
+// the Pelican-mode defaults and egg aliases, and validates, reporting every
+// problem at once with where its value came from.
 func Load() (Config, error) {
-	cfg, err := env.ParseAs[Config]()
+	exe, err := os.Executable()
+	if err != nil {
+		return Config{}, fmt.Errorf("locate the executable: %w", err)
+	}
+	return load(os.Environ(), exe)
+}
+
+func load(environ []string, exe string) (Config, error) {
+	vars, src, gerr := gatherVars(environ, exe)
+	if vars == nil {
+		return Config{}, gerr
+	}
+	cfg, err := env.ParseAsWithOptions[Config](env.Options{Environment: vars})
+	if Host(vars["PZMAN_HOST"]) == HostPelican {
+		cfg.Root = pelicanRoot(exe)
+	}
 	var errs []error
+	if gerr != nil {
+		errs = append(errs, gerr)
+	}
 	if err != nil {
 		var agg env.AggregateError
 		if errors.As(err, &agg) {
@@ -105,7 +147,7 @@ func Load() (Config, error) {
 	if verr := cfg.validate(err == nil); verr != nil {
 		errs = append(errs, verr)
 	}
-	return cfg, errors.Join(errs...)
+	return cfg, src.annotate(errors.Join(errs...))
 }
 
 // Validate enforces the cross-field rules. Called by Load; exported so tests
@@ -114,6 +156,11 @@ func (c Config) Validate() error { return c.validate(true) }
 
 func (c Config) validate(checkHash bool) error {
 	var errs []error
+	switch c.Host {
+	case "", HostDocker, HostPelican: // "" is a Config literal: Docker mode
+	default:
+		errs = append(errs, fmt.Errorf("PZMAN_HOST must be %q or %q, got %q", HostDocker, HostPelican, c.Host))
+	}
 	if checkHash || c.AdminHash != "" {
 		if err := validateAdminHash(c.AdminHash); err != nil {
 			errs = append(errs, err)
@@ -233,6 +280,13 @@ func parseLevel(s string) (slog.Level, error) {
 
 func (c Config) IsDev() bool { return c.Env == "dev" }
 
+// Pelican reports Pelican mode (PZMAN_HOST=pelican).
+func (c Config) Pelican() bool { return c.Host == HostPelican }
+
+// EggAutoUpdateOn is the egg's AUTO_UPDATE=1 in Pelican mode: the yolk image
+// then runs SteamCMD at every container start, before pzman.
+func (c Config) EggAutoUpdateOn() bool { return c.Pelican() && c.EggAutoUpdate == "1" }
+
 func (c Config) Location() *time.Location {
 	loc, err := time.LoadLocation(c.Timezone)
 	if err != nil {
@@ -244,12 +298,12 @@ func (c Config) Location() *time.Location {
 
 // Redacted is a one-line, log-safe rendering: never the hash, secret or token.
 func (c Config) Redacted() string {
-	return fmt.Sprintf("env=%s port=%d drivers=%s scenario=%s install=%s data=%s backups=%s db=%s admin=%s "+
-		"server=%s branch=%q steam=%t puid=%d pgid=%d xmx=%dg tz=%s public_url=%q public_game_address=%q "+
-		"jwt_secret=%s rcon_password=%s mods_token=%s",
-		c.Env, c.Port, c.Drivers, c.Scenario, c.InstallDir, c.DataDir, c.BackupDir, c.DBPath, c.AdminUser,
-		c.ServerName, c.ServerBranch, c.UseSteam, c.PUID, c.PGID, c.MemoryXmxGB, c.Timezone, c.PublicURL,
-		c.PublicGameAddress, setOrUnset(c.JWTSecret), setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
+	return fmt.Sprintf("host=%s env=%s port=%d drivers=%s scenario=%s install=%s data=%s backups=%s db=%s admin=%s "+
+		"server=%s branch=%q steam=%t puid=%d pgid=%d xmx=%dg game_port=%d udp_port=%d tz=%s public_url=%q "+
+		"public_game_address=%q jwt_secret=%s rcon_password=%s mods_token=%s",
+		c.Host, c.Env, c.Port, c.Drivers, c.Scenario, c.InstallDir, c.DataDir, c.BackupDir, c.DBPath, c.AdminUser,
+		c.ServerName, c.ServerBranch, c.UseSteam, c.PUID, c.PGID, c.MemoryXmxGB, c.DefaultPort, c.UDPPort, c.Timezone,
+		c.PublicURL, c.PublicGameAddress, setOrUnset(c.JWTSecret), setOrUnset(c.RCONPassword), setOrUnset(c.ModsToken))
 }
 
 func setOrUnset(s string) string {

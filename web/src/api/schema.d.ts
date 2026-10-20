@@ -1524,6 +1524,23 @@ export interface components {
             diskLevel: string;
             disks: components["schemas"]["Volume"][] | null;
             drivers: string;
+            /** @description pelican: the egg's AUTO_UPDATE=1 updates the game at every container start, bypassing the game version lock */
+            eggAutoUpdate: boolean;
+            /**
+             * Format: int64
+             * @description game UDP port (DEFAULT_PORT)
+             */
+            gamePort: number;
+            /**
+             * @description where pzman runs (PZMAN_HOST); on pelican, Stop and the stop schedule action are unavailable
+             * @enum {string}
+             */
+            host: "docker" | "pelican";
+            /**
+             * Format: int64
+             * @description game heap (-Xmx), GiB
+             */
+            memoryXmxGB: number;
             /** @description unlisted public mod page path (empty when disabled) */
             modsPagePath: string;
             nonSteam: boolean;
@@ -1540,6 +1557,11 @@ export interface components {
             /** Format: date-time */
             time: string;
             timezone: string;
+            /**
+             * Format: int64
+             * @description second game UDP port (UDP_PORT)
+             */
+            udpPort: number;
             version: string;
         };
         Task: {

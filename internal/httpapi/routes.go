@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"reflect"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/sse"
 
+	"github.com/magne4000/easy-pz-docker/internal/app"
 	"github.com/magne4000/easy-pz-docker/internal/backup"
 	"github.com/magne4000/easy-pz-docker/internal/events"
 	"github.com/magne4000/easy-pz-docker/internal/mods"
@@ -62,7 +64,7 @@ func mapErr(err error) error {
 	case errors.Is(err, store.ErrNotFound):
 		return huma.Error404NotFound("not found")
 	case errors.As(err, &busy), errors.Is(err, backup.ErrBusy), errors.Is(err, sched.ErrWindowOpen),
-		errors.Is(err, pz.ErrNotRunning), errors.Is(err, pz.ErrAlreadyRunning),
+		errors.Is(err, pz.ErrNotRunning), errors.Is(err, pz.ErrAlreadyRunning), errors.Is(err, sched.ErrStopUnavailable),
 		errors.Is(err, mods.ErrUploadBusy), errors.Is(err, mods.ErrUploadConflict):
 		return huma.Error409Conflict(err.Error())
 	case errors.Is(err, mods.ErrInvalidID), errors.Is(err, mods.ErrInvalidUpload), errors.Is(err, sched.ErrInvalidSchedule),
@@ -283,6 +285,12 @@ type SystemOutput struct {
 		PublicURL    string       `json:"publicUrl,omitempty" doc:"PANEL_PUBLIC_URL without its trailing slash"`
 		Branch       string       `json:"branch"`
 		Subscribers  int          `json:"subscribers"`
+		Host         string       `json:"host" enum:"docker,pelican" doc:"where pzman runs (PZMAN_HOST); on pelican, Stop and the stop schedule action are unavailable"`
+		// The game's launch settings, after Pelican's egg aliases and heap derivation.
+		MemoryXmxGB   int  `json:"memoryXmxGB" doc:"game heap (-Xmx), GiB"`
+		GamePort      int  `json:"gamePort" doc:"game UDP port (DEFAULT_PORT)"`
+		UDPPort       int  `json:"udpPort" doc:"second game UDP port (UDP_PORT)"`
+		EggAutoUpdate bool `json:"eggAutoUpdate" doc:"pelican: the egg's AUTO_UPDATE=1 updates the game at every container start, bypassing the game version lock"`
 	}
 }
 
@@ -316,6 +324,13 @@ func registerSystem(api huma.API, d Deps) {
 			b.DiskLevel = string(sys.Worst(b.Disks))
 			b.ModsPagePath, b.PublicURL = modsPagePath(d), d.Cfg.PublicOrigin()
 			b.Subscribers = d.Bus.Stats().Subscribers
+			b.Host = string(app.HostDocker)
+			if d.Cfg.Pelican() {
+				// PUID/PGID do not apply there: pzman and the game run as Wings' user.
+				b.Host, b.PUID, b.PGID = string(app.HostPelican), os.Getuid(), os.Getgid()
+			}
+			b.MemoryXmxGB, b.GamePort, b.UDPPort, b.EggAutoUpdate = d.Cfg.MemoryXmxGB, d.Cfg.DefaultPort, d.Cfg.UDPPort,
+				d.Cfg.EggAutoUpdateOn()
 			return out, nil
 		})
 	huma.Register(api, op("get-settings", http.MethodGet, "/settings", "system", "Panel settings"),
