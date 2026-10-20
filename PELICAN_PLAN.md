@@ -107,18 +107,24 @@ quotes, no expansion); the plugin rejects values containing a newline.
 | `PZMAN_HOST=pelican` | selects Pelican mode |
 | `PANEL_PORT` | the server allocation pzman's UI listens on |
 | `PZMAN_PELICAN_SERVER` | the server's UUID (token audience) |
-| `PZMAN_PELICAN_SECRET` | HS256 key shared with the plugin, per server |
+| `PZMAN_PELICAN_PUBLIC_KEY` | the plugin's per-server Ed25519 public key |
 | `PZMAN_PELICAN_PANEL_URL` | panel origin, for links back and redirects |
 | `PANEL_PUBLIC_URL` | `<panel>/easy-pz/<server-id>`: base of the public mod page |
 | `PANEL_PUBLIC_GAME_ADDRESS` | node address + game port, for the launcher |
 
-`PZMAN_PELICAN_SECRET` is 64 lowercase hex characters (32 random bytes); the
-HMAC and JWT key is the ASCII text of that value, not its decoded bytes.
+`PZMAN_PELICAN_PUBLIC_KEY` is the 32-byte Ed25519 public key as 64 lowercase
+hex characters. The plugin generates the keypair per server
+(`sodium_crypto_sign_keypair()`) and keeps the secret key in the panel:
+`pzman.env` is readable by any subuser with file, SFTP or backup access, and
+such a reader must not be able to mint tokens or sign proxied requests.
 
 ### Contract: Pelican tokens
 
-One token format, a JWT signed with HS256 and `PZMAN_PELICAN_SECRET` (any other
-`alg` is refused):
+One token format, a JWT signed with Ed25519 by the plugin and verified with
+`PZMAN_PELICAN_PUBLIC_KEY`: header exactly `{"alg":"EdDSA","typ":"JWT"}`,
+signing input `base64url(header) + "." + base64url(payload)`, signature the
+Ed25519 signature of that input, all base64url without padding. Any other
+`alg` is refused.
 
 | Claim | Value |
 |---|---|
@@ -187,10 +193,17 @@ pzman's token check still applies. pzman builds every public URL (page,
 from the panel URL unchanged (it accepts any path before `/mods/<token>/`).
 
 Each proxied request carries the player's address in `X-Forwarded-For` (one
-IP) and `X-EasyPZ-Proxy: t=<unix seconds>,sig=<hex>`, where `sig` is
-HMAC-SHA256 with `PZMAN_PELICAN_SECRET` over `<t>\n<METHOD>\n<path>` (`path`
-as pzman receives it, without the query). pzman uses `X-Forwarded-For` only
-when the signature is valid and `t` is within 60 s.
+IP) and `X-EasyPZ-Proxy: t=<unix seconds>,sig=<base64url>`, where `sig` is the
+Ed25519 signature (base64url without padding, the plugin's secret key) of
+`<t>\n<METHOD>\n<path>` (`path` as pzman receives it, percent-encoding kept,
+without the query); pzman verifies it with `PZMAN_PELICAN_PUBLIC_KEY` and uses
+`X-Forwarded-For` only when the signature is valid and `t` is within 60 s.
+
+The plugin sends the proxied responses with `Content-Security-Policy: sandbox
+allow-scripts allow-downloads allow-popups`, `X-Content-Type-Options: nosniff`
+and `Access-Control-Allow-Origin: *`, so owner-controlled content never runs
+same-origin with the panel. The page then has an opaque origin: it does not
+depend on storage or cookies, and copying falls back to selecting the text.
 
 ### Contract: release assets
 
@@ -337,7 +350,7 @@ window restarts PZ while Pelican keeps showing the server running.
 
 ### Phase 2: pzman auth and public URLs for Pelican (Go + SPA)
 
-- [ ] Token verification (HS256, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
+- [ ] Token verification (EdDSA, `iss`, `aud`, `exp` ≤ 60 s, clock skew),
       single-use `jti` store for handoffs.
 - [ ] `POST /api/auth/pelican` (handoff → session with scopes, username from
       `name`); SPA route `/auth/pelican` reads the fragment and posts it.
@@ -352,7 +365,7 @@ window restarts PZ while Pelican keeps showing the server running.
 - [ ] Client IP behind the panel: every local client, the panel included,
       reaches pzman from `172.18.0.1` (Phase 0), so an address-based trusted
       proxy cannot tell the panel from anyone else. The plugin signs each
-      proxied request (HMAC with `PZMAN_PELICAN_SECRET` over method, path and
+      proxied request (Ed25519 over method, path and
       a timestamp, in a header); pzman takes `X-Forwarded-For` only from signed
       requests, so per-IP limits apply to players.
 - [ ] Audit: actions logged with the Pelican username.
