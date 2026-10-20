@@ -12,7 +12,8 @@ return new class extends Migration
             $table->increments('id');
             $table->unsignedInteger('server_id')->unique();
             $table->foreign('server_id')->references('id')->on('servers')->cascadeOnDelete();
-            $table->text('secret');
+            // Ed25519 secret key, hex, encrypted with the app key; pzman gets the public key only.
+            $table->text('signing_key');
             $table->unsignedInteger('ui_allocation_id')->nullable();
             $table->foreign('ui_allocation_id')->references('id')->on('allocations')->nullOnDelete();
             $table->string('ui_url_override')->nullable();

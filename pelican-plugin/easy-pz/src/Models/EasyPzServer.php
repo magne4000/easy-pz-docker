@@ -7,13 +7,14 @@ use App\Models\Server;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Support\Carbon;
+use Magne4000\EasyPz\Support\SigningKey;
 
 /**
  * easy-pz state of one server.
  *
  * @property int $id
  * @property int $server_id
- * @property string $secret PZMAN_PELICAN_SECRET
+ * @property string $signing_key the Ed25519 secret key (hex); pzman.env holds its public key
  * @property int|null $ui_allocation_id
  * @property string|null $ui_url_override
  * @property string|null $deployed_version
@@ -29,12 +30,12 @@ class EasyPzServer extends Model
 
     protected $guarded = ['id', 'created_at', 'updated_at'];
 
-    protected $hidden = ['secret'];
+    protected $hidden = ['signing_key'];
 
     protected function casts(): array
     {
         return [
-            'secret' => 'encrypted',
+            'signing_key' => 'encrypted',
             'enabled_at' => 'datetime',
         ];
     }
@@ -47,6 +48,17 @@ class EasyPzServer extends Model
     public static function enabledFor(Server $server): ?self
     {
         return self::query()->where('server_id', $server->id)->whereNotNull('enabled_at')->first();
+    }
+
+    /** The Ed25519 secret key, as bytes. */
+    public function secretKey(): string
+    {
+        return SigningKey::fromHex($this->signing_key);
+    }
+
+    public function publicKeyHex(): string
+    {
+        return SigningKey::publicKeyHex($this->secretKey());
     }
 
     public function isEnabled(): bool

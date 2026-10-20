@@ -7,7 +7,7 @@ use Magne4000\EasyPz\Support\EggCheck;
 use Magne4000\EasyPz\Support\ProxySignature;
 use Magne4000\EasyPz\Support\PzmanEnv;
 use Magne4000\EasyPz\Support\Scopes;
-use Magne4000\EasyPz\Support\Secret;
+use Magne4000\EasyPz\Support\SigningKey;
 use Magne4000\EasyPz\Support\Sha256Sums;
 use Magne4000\EasyPz\Support\Urls;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -15,30 +15,45 @@ use PHPUnit\Framework\TestCase;
 
 final class ContractTest extends TestCase
 {
-    private const SECRET = 'f00dfeedf00dfeedf00dfeedf00dfeedf00dfeedf00dfeedf00dfeedf00dfeed';
-
     public function testProxySignature(): void
     {
-        $header = ProxySignature::header(self::SECRET, 'get', '/mods/tok/download/x.zip', 1_700_000_000);
-        $expected = hash_hmac('sha256', "1700000000\nGET\n/mods/tok/download/x.zip", self::SECRET);
+        $sk = JwtTest::secretKey();
+        $header = ProxySignature::header($sk, 'get', '/mods/tok/download/x.zip', 1_700_000_000);
 
-        self::assertSame("t=1700000000,sig=$expected", $header);
-        self::assertMatchesRegularExpression('/^t=\d+,sig=[0-9a-f]{64}$/', ProxySignature::header(self::SECRET, 'HEAD', '/assets/a.js'));
+        self::assertSame(JwtTest::PROXY_HEADER, $header, 'the method is signed uppercase');
+        self::assertSame("1700000000\nGET\n/mods/tok/download/x.zip", ProxySignature::message(1_700_000_000, 'get', '/mods/tok/download/x.zip'));
+
+        self::assertMatchesRegularExpression('/^t=(\d+),sig=([A-Za-z0-9_-]{86})$/', $h = ProxySignature::header($sk, 'POST', '/mods/tok/files/12'));
+        preg_match('/^t=(\d+),sig=(.+)$/', $h, $m);
+        $sig = (string) base64_decode(strtr($m[2], '-_', '+/'), true);
+        $pk = (string) hex2bin(JwtTest::PUBLIC_KEY);
+        self::assertTrue(sodium_crypto_sign_verify_detached($sig, ProxySignature::message((int) $m[1], 'POST', '/mods/tok/files/12'), $pk));
+        self::assertFalse(sodium_crypto_sign_verify_detached($sig, ProxySignature::message((int) $m[1], 'GET', '/mods/tok/files/12'), $pk));
     }
 
-    public function testSecret(): void
+    public function testSigningKey(): void
     {
-        $a = Secret::generate();
-        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $a);
-        self::assertNotSame($a, Secret::generate());
-        self::assertTrue(Secret::isValid(self::SECRET));
-        self::assertFalse(Secret::isValid(strtoupper(self::SECRET)));
-        self::assertFalse(Secret::isValid(substr(self::SECRET, 1)));
+        $a = SigningKey::generate();
+        self::assertSame(SODIUM_CRYPTO_SIGN_SECRETKEYBYTES, strlen($a));
+        self::assertNotSame($a, SigningKey::generate());
+        self::assertSame($a, SigningKey::fromHex(bin2hex($a)), 'stored as hex');
+        self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', SigningKey::publicKeyHex($a));
+        self::assertSame(bin2hex(substr($a, 32)), SigningKey::publicKeyHex($a));
+
+        self::assertTrue(SigningKey::isValidPublicKeyHex(JwtTest::PUBLIC_KEY));
+        self::assertFalse(SigningKey::isValidPublicKeyHex(strtoupper(JwtTest::PUBLIC_KEY)));
+        self::assertFalse(SigningKey::isValidPublicKeyHex(substr(JwtTest::PUBLIC_KEY, 1)));
+    }
+
+    public function testAMalformedStoredKeyIsRefused(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        SigningKey::fromHex(str_repeat('a', 64));
     }
 
     public function testPzmanEnvHasTheContractKeys(): void
     {
-        $values = PzmanEnv::values(8080, '0d4c1a9e-0000-4000-8000-000000000001', self::SECRET, 'https://panel.example', 'https://panel.example/easy-pz/0d4c1a9e', 'node.example:16261');
+        $values = PzmanEnv::values(8080, '0d4c1a9e-0000-4000-8000-000000000001', JwtTest::PUBLIC_KEY, 'https://panel.example', 'https://panel.example/easy-pz/0d4c1a9e', 'node.example:16261');
         $text = PzmanEnv::render($values);
 
         self::assertStringEndsWith("\n", $text);
@@ -54,11 +69,13 @@ final class ContractTest extends TestCase
             'PZMAN_HOST' => 'pelican',
             'PANEL_PORT' => '8080',
             'PZMAN_PELICAN_SERVER' => '0d4c1a9e-0000-4000-8000-000000000001',
-            'PZMAN_PELICAN_SECRET' => self::SECRET,
+            'PZMAN_PELICAN_PUBLIC_KEY' => JwtTest::PUBLIC_KEY,
             'PZMAN_PELICAN_PANEL_URL' => 'https://panel.example',
             'PANEL_PUBLIC_URL' => 'https://panel.example/easy-pz/0d4c1a9e',
             'PANEL_PUBLIC_GAME_ADDRESS' => 'node.example:16261',
         ], $parsed);
+        self::assertStringNotContainsString(bin2hex(JwtTest::secretKey()), $text);
+        self::assertStringNotContainsString(bin2hex(substr(JwtTest::secretKey(), 0, 32)), $text, 'no seed either');
     }
 
     public function testPzmanEnvValuesAreVerbatim(): void
@@ -83,7 +100,7 @@ final class ContractTest extends TestCase
         PzmanEnv::render($values);
     }
 
-    public function testPzmanEnvRejectsAMalformedSecret(): void
+    public function testPzmanEnvRejectsAMalformedPublicKey(): void
     {
         $this->expectException(InvalidArgumentException::class);
         PzmanEnv::values(1, 's', 'nothex', 'http://p', 'http://p/easy-pz/x', 'h:1');

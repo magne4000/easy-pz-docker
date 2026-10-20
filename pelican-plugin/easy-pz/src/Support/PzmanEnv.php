@@ -17,17 +17,17 @@ final class PzmanEnv
      *
      * @return array<string, string>
      */
-    public static function values(int $panelPort, string $serverUuid, string $secret, string $panelUrl, string $publicUrl, string $gameAddress): array
+    public static function values(int $panelPort, string $serverUuid, string $publicKeyHex, string $panelUrl, string $publicUrl, string $gameAddress): array
     {
-        if (!Secret::isValid($secret)) {
-            throw new InvalidArgumentException('the secret must be 64 lowercase hex characters');
+        if (!SigningKey::isValidPublicKeyHex($publicKeyHex)) {
+            throw new InvalidArgumentException('the public key must be 64 lowercase hex characters');
         }
 
         return [
             'PZMAN_HOST' => 'pelican',
             'PANEL_PORT' => (string) $panelPort,
             'PZMAN_PELICAN_SERVER' => $serverUuid,
-            'PZMAN_PELICAN_SECRET' => $secret,
+            'PZMAN_PELICAN_PUBLIC_KEY' => $publicKeyHex,
             'PZMAN_PELICAN_PANEL_URL' => $panelUrl,
             'PANEL_PUBLIC_URL' => $publicUrl,
             'PANEL_PUBLIC_GAME_ADDRESS' => $gameAddress,

@@ -56,7 +56,7 @@ class PublicProxyController extends Controller
         $method = $request->isMethod('HEAD') ? 'HEAD' : 'GET';
         $headers = [
             'X-Forwarded-For' => (string) $request->ip(),
-            ProxySignature::HEADER => ProxySignature::header($ez->secret, $method, $path),
+            ProxySignature::HEADER => ProxySignature::header($ez->secretKey(), $method, $path),
         ];
         foreach (ProxyRequest::FORWARD as $name) {
             if ($request->headers->has($name)) {

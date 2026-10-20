@@ -18,7 +18,7 @@ use Magne4000\EasyPz\Support\EggCheck;
 use Magne4000\EasyPz\Support\Jwt;
 use Magne4000\EasyPz\Support\PzmanEnv;
 use Magne4000\EasyPz\Support\Scopes;
-use Magne4000\EasyPz\Support\Secret;
+use Magne4000\EasyPz\Support\SigningKey;
 use Magne4000\EasyPz\Support\Sha256Sums;
 use Magne4000\EasyPz\Support\Urls;
 use RuntimeException;
@@ -63,7 +63,7 @@ class EasyPzService
 
     public static function mintToken(User $user, Server $server, EasyPzServer $ez): string
     {
-        return Jwt::mint($ez->secret, $server->uuid, $user->uuid, $user->username, self::scopesFor($user, $server));
+        return Jwt::mint($ez->secretKey(), $server->uuid, $user->uuid, $user->username, self::scopesFor($user, $server));
     }
 
     /**
@@ -113,7 +113,7 @@ class EasyPzService
         return PzmanEnv::render(PzmanEnv::values(
             self::uiAllocation($server, $ez)->port,
             $server->uuid,
-            $ez->secret,
+            $ez->publicKeyHex(),
             Urls::panel($panelUrl),
             Urls::panelPublic($panelUrl, $server->uuid_short),
             Urls::gameAddress($server->node->fqdn, (int) $server->allocation?->port),
@@ -138,7 +138,12 @@ class EasyPzService
         }
 
         $this->assignUi($server, $ez, $uiAllocationId, $uiUrlOverride);
-        $ez->secret = Secret::generate();
+        // Re-enabling keeps the key: pzman sessions and its pzman.env stay valid.
+        try {
+            $ez->secretKey();
+        } catch (\Throwable) {
+            $ez->signing_key = bin2hex(SigningKey::generate());
+        }
 
         // Everything that can fail on the network comes before the startup change.
         $files = (new DaemonFileRepository())->setServer($server);

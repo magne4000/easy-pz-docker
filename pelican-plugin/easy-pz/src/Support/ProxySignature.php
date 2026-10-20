@@ -13,15 +13,16 @@ final class ProxySignature
     /**
      * @param  string  $path  the path exactly as sent to pzman, without the query
      */
-    public static function header(string $secret, string $method, string $path, ?int $now = null): string
+    public static function header(string $secretKey, string $method, string $path, ?int $now = null): string
     {
         $t = $now ?? time();
 
-        return 't=' . $t . ',sig=' . self::sign($secret, $t, $method, $path);
+        return 't=' . $t . ',sig=' . SigningKey::sign($secretKey, self::message($t, $method, $path));
     }
 
-    public static function sign(string $secret, int $t, string $method, string $path): string
+    /** The signed text: `<t>\n<METHOD>\n<path>`. */
+    public static function message(int $t, string $method, string $path): string
     {
-        return hash_hmac('sha256', $t . "\n" . strtoupper($method) . "\n" . $path, $secret);
+        return $t . "\n" . strtoupper($method) . "\n" . $path;
     }
 }

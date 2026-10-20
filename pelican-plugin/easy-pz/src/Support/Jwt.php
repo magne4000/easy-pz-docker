@@ -2,12 +2,11 @@
 
 namespace Magne4000\EasyPz\Support;
 
-use InvalidArgumentException;
 use JsonException;
 
 /**
- * The HS256 JSON Web Tokens of the "Pelican tokens" contract, written by hand:
- * the plugin needs no composer package.
+ * The EdDSA (Ed25519) JSON Web Tokens of the "Pelican tokens" contract, written
+ * by hand: the plugin needs no composer package.
  */
 final class Jwt
 {
@@ -16,23 +15,22 @@ final class Jwt
 
     public const ISSUER = 'pelican';
 
+    /** The header, byte for byte. */
+    public const HEADER = '{"alg":"EdDSA","typ":"JWT"}';
+
     /**
      * Mint a token for one Pelican user and one server.
      *
-     * @param  string  $secret  the server's PZMAN_PELICAN_SECRET, used as ASCII text
+     * @param  string  $secretKey  the server's 64-byte Ed25519 secret key
      * @param  list<string>  $scopes
      *
      * @throws JsonException
      */
-    public static function mint(string $secret, string $serverUuid, string $userUuid, string $username, array $scopes, ?int $now = null, ?string $jti = null): string
+    public static function mint(string $secretKey, string $serverUuid, string $userUuid, string $username, array $scopes, ?int $now = null, ?string $jti = null): string
     {
-        if ($secret === '') {
-            throw new InvalidArgumentException('empty token secret');
-        }
-
         $iat = $now ?? time();
 
-        return self::sign($secret, [
+        return self::sign($secretKey, [
             'iss' => self::ISSUER,
             'aud' => 'pzman:' . $serverUuid,
             'sub' => $userUuid,
@@ -49,13 +47,12 @@ final class Jwt
      *
      * @throws JsonException
      */
-    public static function sign(string $secret, array $claims): string
+    public static function sign(string $secretKey, array $claims): string
     {
-        $flags = JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
-        $input = self::base64url(json_encode(['alg' => 'HS256', 'typ' => 'JWT'], $flags))
-            . '.' . self::base64url(json_encode($claims, $flags));
+        $input = self::base64url(self::HEADER)
+            . '.' . self::base64url(json_encode($claims, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
 
-        return $input . '.' . self::base64url(hash_hmac('sha256', $input, $secret, true));
+        return $input . '.' . SigningKey::sign($secretKey, $input);
     }
 
     public static function base64url(string $data): string
