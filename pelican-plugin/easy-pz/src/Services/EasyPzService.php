@@ -66,14 +66,24 @@ class EasyPzService
         return Jwt::mint($ez->secret, $server->uuid, $user->uuid, $user->username, self::scopesFor($user, $server));
     }
 
-    public static function uiUrl(Server $server, EasyPzServer $ez): string
+    /**
+     * The UI allocation, still assigned to this server. An owner can detach it
+     * (the row stays, `server_id` becomes null) and it may then go to another
+     * server: never send anything there.
+     */
+    public static function uiAllocation(Server $server, EasyPzServer $ez): Allocation
     {
         $allocation = $ez->uiAllocation;
-        if (!$allocation && trim((string) $ez->ui_url_override) === '') {
+        if (!$allocation || $allocation->server_id !== $server->id) {
             throw new RuntimeException(trans('easy-pz::strings.errors.no_ui_allocation'));
         }
 
-        return Urls::pzmanUi($server->node->fqdn, (int) $allocation?->port, $ez->ui_url_override);
+        return $allocation;
+    }
+
+    public static function uiUrl(Server $server, EasyPzServer $ez): string
+    {
+        return Urls::pzmanUi($server->node->fqdn, self::uiAllocation($server, $ez)->port, $ez->ui_url_override);
     }
 
     /** @return list<string> why the egg does not fit, empty when it does */
@@ -101,7 +111,7 @@ class EasyPzService
         $panelUrl = (string) config('app.url');
 
         return PzmanEnv::render(PzmanEnv::values(
-            (int) $ez->uiAllocation?->port,
+            self::uiAllocation($server, $ez)->port,
             $server->uuid,
             $ez->secret,
             Urls::panel($panelUrl),

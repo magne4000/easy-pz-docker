@@ -8,6 +8,7 @@ use Illuminate\Routing\Controller;
 use Magne4000\EasyPz\Models\EasyPzServer;
 use Magne4000\EasyPz\Services\EasyPzService;
 use Magne4000\EasyPz\Support\Scopes;
+use RuntimeException;
 
 /**
  * "Open easy-pz": a single-use token in the fragment of pzman's
@@ -26,9 +27,15 @@ class HandoffController extends Controller
         $ez = EasyPzServer::enabledFor($server);
         abort_if(!$ez, 404);
 
+        try {
+            $url = EasyPzService::uiUrl($server, $ez);
+        } catch (RuntimeException $exception) {
+            abort(503, $exception->getMessage());
+        }
+
         $token = EasyPzService::mintToken($user, $server, $ez);
 
-        return redirect()->away(EasyPzService::uiUrl($server, $ez) . '/auth/pelican#t=' . $token)
+        return redirect()->away($url . '/auth/pelican#t=' . $token)
             ->header('Cache-Control', 'no-store')
             ->header('Referrer-Policy', 'no-referrer');
     }
