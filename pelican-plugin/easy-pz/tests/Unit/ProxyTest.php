@@ -45,6 +45,24 @@ final class ProxyTest extends TestCase
         ], $out);
     }
 
+    public function testForwardHeaders(): void
+    {
+        $client = [
+            'range' => ['bytes=0-9'],
+            'content-type' => ['application/json'],
+            'content-length' => ['17'],
+            'cookie' => ['pelican_session=secret'],
+            'authorization' => ['Bearer x'],
+            'x-forwarded-for' => ['203.0.113.7'],
+            'x-easypz-proxy' => ['t=1,sig=forged'],
+        ];
+
+        self::assertSame(['Range' => 'bytes=0-9'], ProxyRequest::forwardHeaders('GET', $client));
+        self::assertSame(['Range' => 'bytes=0-9'], ProxyRequest::forwardHeaders('HEAD', $client));
+        self::assertSame(['Range' => 'bytes=0-9', 'Content-Type' => 'application/json', 'Content-Length' => '17'], ProxyRequest::forwardHeaders('post', $client));
+        self::assertSame(['GET', 'HEAD', 'POST'], ProxyRequest::MODS_METHODS);
+    }
+
     public function testIsDownload(): void
     {
         self::assertTrue(DownloadSlots::isDownload('download/pack.zip'));

@@ -53,21 +53,26 @@ class PublicProxyController extends Controller
             register_shutdown_function(fn () => $lock->release());
         }
 
-        $method = $request->isMethod('HEAD') ? 'HEAD' : 'GET';
+        // The real method: the signature covers it, and Laravel's `_method`
+        // override must not turn a POST into something else.
+        $method = strtoupper($request->getRealMethod());
+        if (!in_array($method, $request->route()->methods(), true)) {
+            $lock?->release();
+
+            return $this->plain(405, 'Method not allowed');
+        }
         $headers = [
+            ...ProxyRequest::forwardHeaders($method, $request->headers->all()),
             'X-Forwarded-For' => (string) $request->ip(),
             ProxySignature::HEADER => ProxySignature::header($ez->secretKey(), $method, $path),
         ];
-        foreach (ProxyRequest::FORWARD as $name) {
-            if ($request->headers->has($name)) {
-                $headers[$name] = (string) $request->headers->get($name);
-            }
-        }
         $query = $request->getQueryString();
 
         try {
             $upstream = (new Client())->request($method, EasyPzService::uiUrl($server, $ez) . $path . ($query ? "?$query" : ''), [
                 'headers' => $headers,
+                // POST files/<id>: the selection, streamed from php://input
+                'body' => $method === 'POST' ? $request->getContent(true) : null,
                 'stream' => true,
                 'http_errors' => false,
                 'allow_redirects' => false,
