@@ -353,6 +353,15 @@ func (s *Scheduler) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// Get returns one schedule.
+func (s *Scheduler) Get(ctx context.Context, id int64) (Schedule, error) {
+	sc, err := s.db.GetSchedule(ctx, id)
+	if err != nil {
+		return Schedule{}, err
+	}
+	return s.view(sc), nil
+}
+
 // RunNow executes a schedule immediately, in the background.
 func (s *Scheduler) RunNow(ctx context.Context, id int64) error {
 	if _, err := s.db.GetSchedule(ctx, id); err != nil {

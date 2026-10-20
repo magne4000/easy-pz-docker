@@ -189,7 +189,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The server .ini as structured entries */
+        /** The server .ini as structured entries; RCONPassword is withheld without the config scope */
         get: operations["get-ini"];
         /** Save ini values (and optionally reloadoptions) */
         put: operations["update-ini"];
@@ -487,7 +487,7 @@ export interface paths {
         /** Scheduled restarts, saves, broadcasts and backups */
         get: operations["list-schedules"];
         put?: never;
-        /** Create a schedule */
+        /** Create a schedule (its action's scope is needed too) */
         post: operations["create-schedule"];
         delete?: never;
         options?: never;
@@ -503,7 +503,7 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Update a schedule */
+        /** Update a schedule (the scopes of its current and new action are needed too) */
         put: operations["update-schedule"];
         post?: never;
         /** Delete a schedule */
@@ -522,7 +522,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Run a schedule now */
+        /** Run a schedule now (its action's scope is needed too) */
         post: operations["run-schedule"];
         delete?: never;
         options?: never;
@@ -1001,6 +1001,8 @@ export interface components {
             key: string;
             /** @description owned by pzman (mods, backups); edit it elsewhere */
             managed: boolean;
+            /** @description value withheld (empty): RCONPassword without the config scope */
+            redacted?: boolean;
             value: string;
         };
         IniOutputBody: {
@@ -3277,6 +3279,15 @@ export interface operations {
                     "application/json": components["schemas"]["Schedule"];
                 };
             };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
             /** @description Unprocessable Entity */
             422: {
                 headers: {
@@ -3319,6 +3330,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Not Found */
@@ -3415,6 +3435,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AcceptedBody"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
                 };
             };
             /** @description Not Found */

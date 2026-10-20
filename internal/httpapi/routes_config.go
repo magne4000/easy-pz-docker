@@ -24,10 +24,11 @@ import (
 var managedKeys = []string{"Mods", "WorkshopItems", "Map", "BackupsOnStart", "BackupsOnVersionChange"}
 
 type IniEntryView struct {
-	Key     string `json:"key"`
-	Value   string `json:"value"`
-	Comment string `json:"comment"`
-	Managed bool   `json:"managed" doc:"owned by pzman (mods, backups); edit it elsewhere"`
+	Key      string `json:"key"`
+	Value    string `json:"value"`
+	Comment  string `json:"comment"`
+	Managed  bool   `json:"managed" doc:"owned by pzman (mods, backups); edit it elsewhere"`
+	Redacted bool   `json:"redacted,omitempty" doc:"value withheld (empty): RCONPassword without the config scope"`
 }
 
 type IniOutput struct {
@@ -140,7 +141,8 @@ var keyRe = func(k string) bool {
 }
 
 func registerConfig(api huma.API, d Deps) {
-	huma.Register(api, op("get-ini", http.MethodGet, "/config/ini", "config", "The server .ini as structured entries"),
+	huma.Register(api, op("get-ini", http.MethodGet, "/config/ini", "config",
+		"The server .ini as structured entries; RCONPassword is withheld without the config scope"),
 		func(ctx context.Context, _ *struct{}) (*IniOutput, error) {
 			out := &IniOutput{}
 			out.Body.Path, out.Body.Entries = iniPath(d), []IniEntryView{}
@@ -152,12 +154,18 @@ func registerConfig(api huma.API, d Deps) {
 				return nil, mapErr(err)
 			}
 			out.Body.Exists = true
+			// RCON runs any console command: only who may change the config sees it.
+			withhold := !principalFrom(ctx).has(scopeConfig)
 			for _, e := range ini.Entries() {
 				managed := false
 				for _, m := range managedKeys {
 					managed = managed || m == e.Key
 				}
-				out.Body.Entries = append(out.Body.Entries, IniEntryView{Key: e.Key, Value: e.Value, Comment: e.Comment, Managed: managed})
+				v := IniEntryView{Key: e.Key, Value: e.Value, Comment: e.Comment, Managed: managed}
+				if withhold && e.Key == "RCONPassword" && e.Value != "" {
+					v.Value, v.Redacted = "", true
+				}
+				out.Body.Entries = append(out.Body.Entries, v)
 			}
 			return out, nil
 		})
