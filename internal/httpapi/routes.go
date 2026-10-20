@@ -240,6 +240,14 @@ func registerEvents(api huma.API, d Deps) {
 		Summary:  "Live event stream (invalidation signals); accepts ?ticket= (EventSource cannot send headers)",
 		Metadata: map[string]any{ticketMeta: true},
 	}, events.EventTypeMap(), func(ctx context.Context, _ *struct{}, send sse.Sender) {
+		// The stream ends with the credential that opened it: a session that
+		// ends (or a permission revoked in Pelican) stops the events too; the
+		// SPA reconnects with a new ticket, which then needs a live session.
+		if exp := principalFrom(ctx).Expires; !exp.IsZero() {
+			var stop context.CancelFunc
+			ctx, stop = context.WithDeadline(ctx, exp)
+			defer stop()
+		}
 		ch, cancel := d.Bus.Subscribe()
 		defer cancel()
 		ticker := time.NewTicker(heartbeat)

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 )
@@ -76,6 +77,10 @@ type principal struct {
 	Name    string // shown in the UI and the audit log
 	Scopes  []string
 	Pelican bool
+	// Expires is when the credential ends: the session token's exp (a
+	// ticket carries the minting session's), a Pelican service token's own
+	// exp. Long-lived responses (the event stream) end there.
+	Expires time.Time
 }
 
 func (p principal) has(scope string) bool { return slices.Contains(p.Scopes, scope) }

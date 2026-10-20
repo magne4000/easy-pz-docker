@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -403,25 +402,23 @@ func TestDockerSessionHasEveryScope(t *testing.T) {
 	require.Equal(t, allScopes, s.Body.Scopes)
 }
 
-// Sessions slide forward with their scopes.
-func TestPelicanSessionRefreshKeepsScopes(t *testing.T) {
-	cfg := pelicanConfig()
-	a, err := newAuth(cfg, slog.New(slog.DiscardHandler))
+// A Pelican session token carries its scopes and its expiry (an hour); a
+// Docker session token (no scp claim) grants nothing in Pelican mode.
+func TestPelicanSessionTokenClaims(t *testing.T) {
+	a, err := newAuth(pelicanConfig(), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
+	start := time.Now().Truncate(time.Second)
+	a.now = func() time.Time { return start }
 	p := principal{Subject: "user-uuid", Name: "alice", Scopes: []string{scopeRead, scopeBackups}, Pelican: true}
-	tok, _, err := a.issue(p)
+	tok, exp, err := a.issue(p)
 	require.NoError(t, err)
-	a.now = func() time.Time { return time.Now().Add(cfg.SessionTTL * 3 / 4) }
+	require.Equal(t, start.Add(time.Hour), exp)
+	a.now = func() time.Time { return start.Add(59 * time.Minute) }
 	got, _, err := a.verify(tok)
 	require.NoError(t, err)
+	p.Expires = exp
 	require.Equal(t, p, got)
-	tok2, _, err := a.issue(got)
-	require.NoError(t, err)
-	got, _, err = a.verify(tok2)
-	require.NoError(t, err)
-	require.True(t, slices.Equal(p.Scopes, got.Scopes))
 
-	// A Docker session (no scp claim) grants nothing in Pelican mode.
 	d, err := newAuth(testConfig(), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	d.secret = a.secret

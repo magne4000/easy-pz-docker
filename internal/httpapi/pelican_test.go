@@ -86,7 +86,7 @@ func TestPluginInteropConstants(t *testing.T) {
 	got, err := p.verify(tok)
 	require.NoError(t, err)
 	require.Equal(t, principal{Subject: "b3a1c2d4-0000-4000-8000-000000000002", Name: "alice",
-		Scopes: []string{scopeRead, scopeControl}, Pelican: true}, got)
+		Scopes: []string{scopeRead, scopeControl}, Pelican: true, Expires: time.Unix(1700000060, 0)}, got)
 	_, err = p.verify(tok)
 	require.ErrorIs(t, err, errTokenUsed)
 	s, err := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{}).SigningString()
@@ -103,7 +103,8 @@ func TestPluginTokenVector(t *testing.T) {
 	got, err := p.verify(pluginToken)
 	require.NoError(t, err)
 	require.Equal(t, principal{Subject: "5f0e1d2c-3b4a-4958-8776-655443322110", Name: "zoë/admin",
-		Scopes: []string{scopeRead, scopeControl}, Pelican: true}, got, "unknown scopes are ignored")
+		Scopes: []string{scopeRead, scopeControl}, Pelican: true, Expires: time.Unix(1700000060, 0)}, got,
+		"unknown scopes are ignored; the token's exp is the principal's")
 	_, err = p.verify(pluginToken)
 	require.ErrorIs(t, err, errTokenUsed)
 

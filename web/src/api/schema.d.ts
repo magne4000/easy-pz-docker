@@ -86,7 +86,7 @@ export interface paths {
         put?: never;
         /**
          * A single-use, 30 s ticket for the event stream or a backup download
-         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user and scopes.
+         * @description For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` on the given path. It carries the session's user, scopes and expiry.
          */
         post: operations["create-ticket"];
         delete?: never;
@@ -1978,8 +1978,26 @@ export interface operations {
                     "application/json": components["schemas"]["TicketOutputBody"];
                 };
             };
-            /** @description Error */
-            default: {
+            /** @description Unprocessable Entity */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ErrorModel"];
+                };
+            };
+            /** @description Service Unavailable */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

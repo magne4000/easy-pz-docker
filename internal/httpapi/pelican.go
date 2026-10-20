@@ -91,7 +91,8 @@ func (p *pelican) verify(raw string) (principal, error) {
 	if name == "" {
 		name = cl.Subject
 	}
-	return principal{Subject: cl.Subject, Name: name, Scopes: knownScopes(cl.Scopes), Pelican: true}, nil
+	return principal{Subject: cl.Subject, Name: name, Scopes: knownScopes(cl.Scopes), Pelican: true,
+		Expires: cl.ExpiresAt.Time}, nil
 }
 
 // consume records jti until forget, the last moment the token could still

@@ -25,12 +25,32 @@ type ticket struct {
 }
 
 type tickets struct {
-	now func() time.Time
-	mu  sync.Mutex
-	m   map[string]ticket
+	now       func() time.Time
+	mu        sync.Mutex
+	m         map[string]ticket
+	bySubject map[string]int // live tickets per principal.Subject
 }
 
-func newTickets(now func() time.Time) *tickets { return &tickets{now: now, m: map[string]ticket{}} }
+func newTickets(now func() time.Time) *tickets {
+	return &tickets{now: now, m: map[string]ticket{}, bySubject: map[string]int{}}
+}
+
+// remove drops a ticket; t.mu is held.
+func (t *tickets) remove(id string, tk ticket) {
+	delete(t.m, id)
+	if t.bySubject[tk.p.Subject]--; t.bySubject[tk.p.Subject] <= 0 {
+		delete(t.bySubject, tk.p.Subject)
+	}
+}
+
+// sweep drops the expired tickets; t.mu is held.
+func (t *tickets) sweep(now time.Time) {
+	for id, tk := range t.m {
+		if now.After(tk.exp) {
+			t.remove(id, tk)
+		}
+	}
+}
 
 // issue returns a new ticket for p, valid once on path for ticketTTL.
 func (t *tickets) issue(p principal, path string) (string, time.Time, error) {
@@ -44,16 +64,13 @@ func (t *tickets) issue(p principal, path string) (string, time.Time, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if len(t.m) >= maxLiveTickets {
-		for k, v := range t.m {
-			if now.After(v.exp) {
-				delete(t.m, k)
-			}
-		}
-		if len(t.m) >= maxLiveTickets {
-			return "", time.Time{}, errors.New("too many tickets in flight, retry in a minute")
-		}
+		t.sweep(now)
+	}
+	if len(t.m) >= maxLiveTickets {
+		return "", time.Time{}, errors.New("too many tickets in flight, retry in a minute")
 	}
 	t.m[id] = ticket{p: p, path: path, exp: exp}
+	t.bySubject[p.Subject]++
 	return id, exp, nil
 }
 
@@ -61,7 +78,9 @@ func (t *tickets) issue(p principal, path string) (string, time.Time, error) {
 func (t *tickets) use(id, path string) (principal, error) {
 	t.mu.Lock()
 	tk, ok := t.m[id]
-	delete(t.m, id)
+	if ok {
+		t.remove(id, tk)
+	}
 	t.mu.Unlock()
 	switch {
 	case !ok:
@@ -70,6 +89,8 @@ func (t *tickets) use(id, path string) (principal, error) {
 		return principal{}, errors.New("expired ticket")
 	case tk.path != path:
 		return principal{}, errors.New("the ticket is for another path")
+	case !tk.p.Expires.IsZero() && t.now().After(tk.p.Expires):
+		return principal{}, errors.New("the session that made the ticket ended")
 	}
 	return tk.p, nil
 }

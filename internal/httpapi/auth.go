@@ -166,12 +166,14 @@ func (a *auth) verify(raw string) (principal, time.Time, error) {
 		if cl.Subject == "" {
 			return principal{}, time.Time{}, errors.New("no subject")
 		}
-		return principal{Subject: cl.Subject, Name: cl.Name, Scopes: knownScopes(cl.Scopes), Pelican: true}, exp, nil
+		return principal{Subject: cl.Subject, Name: cl.Name, Scopes: knownScopes(cl.Scopes), Pelican: true, Expires: exp}, exp, nil
 	}
 	if subtle.ConstantTimeCompare([]byte(cl.Subject), []byte(a.cfg.AdminUser)) != 1 {
 		return principal{}, time.Time{}, errors.New("unknown subject")
 	}
-	return a.admin(), exp, nil
+	p := a.admin()
+	p.Expires = exp
+	return p, exp, nil
 }
 
 // admin is the password session's principal: every scope.
@@ -433,7 +435,8 @@ func (a *auth) register(api huma.API) {
 		Metadata: map[string]any{scopeMeta: scopeRead},
 		Summary:  "A single-use, 30 s ticket for the event stream or a backup download",
 		Description: "For requests that cannot send an Authorization header (EventSource, download links): pass it as `?ticket=` " +
-			"on the given path. It carries the session's user and scopes.",
+			"on the given path. It carries the session's user, scopes and expiry.",
+		Errors: []int{http.StatusServiceUnavailable},
 	}, func(ctx context.Context, in *TicketInput) (*TicketOutput, error) {
 		id, exp, err := a.tickets.issue(principalFrom(ctx), in.Body.Path)
 		if err != nil {
