@@ -75,6 +75,13 @@ func NewAPI(version string, fcfg fiber.Config) (*fiber.App, fiber.Router, huma.A
 }
 
 func New(cfg app.Config, log *slog.Logger, deps Deps) (*Server, error) {
+	proxyHeader := fiber.HeaderXForwardedFor
+	if cfg.Pelican() {
+		// Every local client, the panel included, connects from the Wings
+		// gateway: X-Forwarded-For counts only when the plugin signed the
+		// request (pelican.clientIP), never by address.
+		proxyHeader = ""
+	}
 	a, g, api := NewAPI(deps.Version, fiber.Config{
 		ReadTimeout: 15 * time.Second,
 		// Bodies over the (default) BodyLimit reach the router as streams:
@@ -88,7 +95,7 @@ func New(cfg app.Config, log *slog.Logger, deps Deps) (*Server, error) {
 			Proxies:  cfg.TrustedProxies,
 			Loopback: true,
 		},
-		ProxyHeader: fiber.HeaderXForwardedFor,
+		ProxyHeader: proxyHeader,
 	})
 	a.Use(limitBody(fiber.DefaultBodyLimit))
 	s := &Server{cfg: cfg, log: log, app: a}
@@ -123,7 +130,7 @@ func New(cfg app.Config, log *slog.Logger, deps Deps) (*Server, error) {
 	api.UseMiddleware(auth.middleware(api))
 	auth.register(api)
 	RegisterRoutes(api, deps)
-	registerPublic(a, deps, log)
+	registerPublic(a, deps, log, auth.pelican)
 
 	if !cfg.IsDev() && webui.Available() {
 		mountStatic(a)
