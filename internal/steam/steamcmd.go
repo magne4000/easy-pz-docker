@@ -223,7 +223,11 @@ func (s *SteamCMD) AppUpdate(ctx context.Context, branch string, validate bool, 
 	if onProgress == nil {
 		onProgress = func(Progress) {}
 	}
-	args := []string{"+force_install_dir", s.o.InstallDir, "+login", "anonymous", "+app_update", AppID}
+	// app_update decides before a fresh Steam home (a recreated container) has
+	// the app's info: it then calls an outdated install "already up to date" and
+	// fails a new one with "Missing configuration". app_info_print waits for it
+	// (app_info_update 1, app_status and app_info_request do not).
+	args := []string{"+force_install_dir", s.o.InstallDir, "+login", "anonymous", "+app_info_print", AppID, "+app_update", AppID}
 	if branch != "" && branch != "public" {
 		args = append(args, "-beta", branch)
 	}
@@ -233,17 +237,47 @@ func (s *SteamCMD) AppUpdate(ctx context.Context, branch string, validate bool, 
 	args = append(args, "+quit")
 	onProgress(Progress{Phase: "login", Message: "Connecting to Steam"})
 	err := s.appUpdateOnce(ctx, args, onProgress)
-	// A fresh Steam home has no cached app info, and steamcmd's first app_update
-	// then often fails with "Missing configuration"; the rerun finds it cached.
-	if err != nil && strings.Contains(err.Error(), "Missing configuration") {
-		s.o.Log.Warn("steamcmd reported missing configuration, retrying once", "err", err)
-		err = s.appUpdateOnce(ctx, args, onProgress)
+	// 0x6 is "installed, update required" with nothing downloaded. For a delta
+	// update steamcmd needs the installed build's depot manifests; it caches them
+	// in its home, and Steam only serves them again while that build is on the
+	// branch ("Failed to get manifest request code, 'Access Denied'" in
+	// content_log.txt). The cache is gone after a recreated container or when
+	// another steamcmd installed the game. Without the app manifest steamcmd
+	// skips them and verifies the files on disk against the new build.
+	if err != nil && strings.Contains(err.Error(), "state is 0x6 after update job") {
+		s.o.Log.Warn("steamcmd could not update the installed build, verifying the game files instead", "err", err)
+		onProgress(Progress{Phase: "verifying", Message: "Steam no longer serves the installed build's manifests: verifying game files against the new build"})
+		err = s.updateWithoutManifest(ctx, args, onProgress)
 	}
 	if err != nil {
 		return err
 	}
 	onProgress(Progress{Phase: "done", Percent: 100, Message: "Game files up to date"})
 	return nil
+}
+
+// updateWithoutManifest reruns app_update with the app manifest set aside and
+// validate on, so steamcmd treats the files on disk as an unknown install.
+func (s *SteamCMD) updateWithoutManifest(ctx context.Context, args []string, onProgress func(Progress)) error {
+	acf := filepath.Join(s.o.InstallDir, "steamapps", "appmanifest_"+AppID+".acf")
+	bak := acf + ".bak"
+	if err := os.Rename(acf, bak); err != nil {
+		return fmt.Errorf("set the app manifest aside: %w", err)
+	}
+	if !slices.Contains(args, "validate") {
+		args = slices.Insert(slices.Clone(args), len(args)-1, "validate") // before +quit
+	}
+	err := s.appUpdateOnce(ctx, args, onProgress)
+	if _, serr := os.Stat(acf); errors.Is(serr, fs.ErrNotExist) {
+		// steamcmd wrote nothing: put the old manifest back, or the game would read as not installed.
+		if rerr := os.Rename(bak, acf); rerr != nil {
+			return errors.Join(err, fmt.Errorf("restore the app manifest: %w", rerr))
+		}
+		return err
+	}
+	// steamcmd's own manifest now describes the files, even after a failed run.
+	os.Remove(bak)
+	return err
 }
 
 func (s *SteamCMD) appUpdateOnce(ctx context.Context, args []string, onProgress func(Progress)) error {

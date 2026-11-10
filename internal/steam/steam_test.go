@@ -146,28 +146,67 @@ func TestAppUpdateParsing(t *testing.T) {
 	require.NoError(t, s.WorkshopDownload(context.Background(), []WorkshopItem{{ID: "1"}}, nil))
 }
 
-func TestAppUpdateRetriesMissingConfiguration(t *testing.T) {
-	transcripts := []string{
-		"ERROR! Failed to install app '380870' (Missing configuration)\n",
-		"Success! App '380870' fully installed.\n",
-	}
-	s, _ := newTest("", time.Second)
-	calls := 0
+func TestAppUpdateRecoversUnreachableManifests(t *testing.T) {
+	install := t.TempDir()
+	acf := filepath.Join(install, "steamapps", "appmanifest_380870.acf")
+	require.NoError(t, os.MkdirAll(filepath.Dir(acf), 0o755))
+	s := NewSteamCMD(Options{InstallDir: install, Stall: time.Second, UID: -1})
+	stuck := "Error! App '380870' state is 0x6 after update job.\n"
+	// second is the recovery run: it sees the files with no app manifest and
+	// returns its transcript, optionally writing a manifest of its own.
+	var second func(args []string) (transcript string, writes bool)
+	var calls int
 	s.run = func(ctx context.Context, args []string) (io.ReadCloser, func() error, error) {
-		pr, pw := io.Pipe()
-		tr := transcripts[min(calls, len(transcripts)-1)]
 		calls++
+		tr := stuck
+		if calls == 2 {
+			_, err := os.Stat(acf)
+			require.ErrorIs(t, err, os.ErrNotExist, "the recovery run must not see the old manifest")
+			var writes bool
+			tr, writes = second(args)
+			if writes {
+				require.NoError(t, os.WriteFile(acf, []byte(`"AppState" { "buildid" "2" }`), 0o644))
+			}
+		}
+		pr, pw := io.Pipe()
 		go func() { io.WriteString(pw, tr); pw.Close() }()
 		return pr, func() error { return nil }, nil
 	}
+	reset := func() {
+		calls = 0
+		require.NoError(t, os.WriteFile(acf, []byte(appManifest), 0o644))
+	}
+
+	reset()
+	second = func(args []string) (string, bool) {
+		require.Equal(t, []string{"validate", "+quit"}, args[len(args)-2:])
+		return "Success! App '380870' fully installed.\n", true
+	}
 	require.NoError(t, s.AppUpdate(context.Background(), "", false, nil))
 	require.Equal(t, 2, calls)
+	m, err := ReadAppManifest(install)
+	require.NoError(t, err)
+	require.Equal(t, "2", m.BuildID)
+	require.NoFileExists(t, acf+".bak")
 
-	// Only one retry: a persistent failure still surfaces.
-	calls = 0
-	transcripts = transcripts[:1]
-	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "Missing configuration")
-	require.Equal(t, 2, calls)
+	// Failing before writing anything: the old manifest comes back, so the
+	// installed game still reads as installed.
+	reset()
+	second = func([]string) (string, bool) { return stuck, false }
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "0x6")
+	m, err = ReadAppManifest(install)
+	require.NoError(t, err)
+	require.Equal(t, "24909836", m.BuildID)
+	require.NoFileExists(t, acf+".bak")
+
+	// Failing after steamcmd wrote its own manifest: that one describes the files.
+	reset()
+	second = func([]string) (string, bool) { return "ERROR! Failed to install app '380870' (No connection)\n", true }
+	require.ErrorContains(t, s.AppUpdate(context.Background(), "", false, nil), "No connection")
+	m, err = ReadAppManifest(install)
+	require.NoError(t, err)
+	require.Equal(t, "2", m.BuildID)
+	require.NoFileExists(t, acf+".bak")
 }
 
 func TestWorkshopDownloadParsing(t *testing.T) {
